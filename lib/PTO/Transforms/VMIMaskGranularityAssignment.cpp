@@ -280,13 +280,13 @@ struct MaskGranularitySolver {
           return constraintResult(requestMaskUse(vmull.getMaskMutable(),
                                                  "b32", op));
         })
-        .Case<VMIVaddcOp>([this, op](VMIVaddcOp addc) {
+        .Case<VMIVaddcOp, VMIVsubcOp>([this, op](auto addc) {
           bool failedToConstrain =
               failed(requestMaskUse(addc.getMaskMutable(), "b32", op)) ||
               failed(requestMask(addc.getCarry(), "b32", op));
           return constraintResult(failure(failedToConstrain));
         })
-        .Case<VMIVaddcsOp>([this, op](VMIVaddcsOp addcs) {
+        .Case<VMIVaddcsOp, VMIVsubcsOp>([this, op](auto addcs) {
           bool failedToConstrain =
               failed(requestMaskUse(addcs.getCarryInMutable(), "b32", op)) ||
               failed(requestMaskUse(addcs.getMaskMutable(), "b32", op)) ||

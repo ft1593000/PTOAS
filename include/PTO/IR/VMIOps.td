@@ -989,6 +989,29 @@ def VMIVaddcOp : VMI_Op<"vaddc", [Pure]> {
   let assemblyFormat = "$lhs `,` $rhs `,` $mask attr-dict `:` type($lhs) `,` type($rhs) `,` type($mask) `->` type($result) `,` type($carry)";
 }
 
+def VMIVsubcOp : VMI_Op<"vsubc", [Pure]> {
+  let summary = "VMI integer subtract with per-lane carry output";
+  let description = [{
+    Subtracts two integer vectors and returns both the truncated result and the
+    per-lane not-borrow predicate. The operation is restricted to the 32-bit
+    integer forms supported by the underlying VPTO carry instruction.
+  }];
+  let arguments = (ins
+    VMI_VRegTypeConstraint:$lhs,
+    VMI_VRegTypeConstraint:$rhs,
+    VMI_MaskTypeConstraint:$mask
+  );
+  let results = (outs
+    VMI_VRegTypeConstraint:$result,
+    VMI_MaskTypeConstraint:$carry
+  );
+  let hasVerifier = 1;
+  let assemblyFormat = [{
+    $lhs `,` $rhs `,` $mask attr-dict `:` type($lhs) `,`
+    type($rhs) `,` type($mask) `->` type($result) `,` type($carry)
+  }];
+}
+
 def VMIVaddcsOp : VMI_Op<"vaddcs", [Pure]> {
   let summary = "VMI integer add with carry-in and carry-out";
   let description = [{
@@ -996,6 +1019,32 @@ def VMIVaddcsOp : VMI_Op<"vaddcs", [Pure]> {
     the truncated result and the per-lane carry-out predicate.  The operation
     is restricted to the 32-bit integer forms supported by the underlying VPTO
     carry instruction.
+  }];
+  let arguments = (ins
+    VMI_VRegTypeConstraint:$lhs,
+    VMI_VRegTypeConstraint:$rhs,
+    VMI_MaskTypeConstraint:$carry_in,
+    VMI_MaskTypeConstraint:$mask
+  );
+  let results = (outs
+    VMI_VRegTypeConstraint:$result,
+    VMI_MaskTypeConstraint:$carry
+  );
+  let hasVerifier = 1;
+  let assemblyFormat = [{
+    $lhs `,` $rhs `,` $carry_in `,` $mask attr-dict `:` type($lhs) `,`
+    type($rhs) `,` type($carry_in) `,` type($mask) `->` type($result) `,`
+    type($carry)
+  }];
+}
+
+def VMIVsubcsOp : VMI_Op<"vsubcs", [Pure]> {
+  let summary = "VMI integer subtract with carry-in and carry-out";
+  let description = [{
+    Subtracts two integer vectors and a per-lane carry-in predicate, returning
+    both the truncated result and the per-lane carry-out predicate.  The
+    operation is restricted to the 32-bit integer forms supported by the
+    underlying VPTO carry instruction.
   }];
   let arguments = (ins
     VMI_VRegTypeConstraint:$lhs,

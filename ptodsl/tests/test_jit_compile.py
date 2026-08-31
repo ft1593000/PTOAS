@@ -3164,6 +3164,13 @@ def public_vector_surface_probe(inp_tile: pto.Tile, out_tile: pto.Tile, stats_ti
     s_shifted = pto.vsub(s_row, row_max_broadcast, col_mask)
     p_row = pto.vexp(s_shifted, col_mask)
     row_sum = pto.vcgadd(p_row, col_mask)
+    integer_mask = pto.pset_b32(pto.MaskPattern.ALL)
+    integer_lhs = pto.vbr(pto.const(3, dtype=pto.ui32))
+    integer_rhs = pto.vbr(pto.const(7, dtype=pto.ui32))
+    difference, sub_carry = pto.vsubc(integer_lhs, integer_rhs, integer_mask)
+    # Keep both results live: for 3 - 7, the documented not-borrow predicate is 0.
+    _ = difference
+    sub_carry = pto.pnot(sub_carry, integer_mask)
     # Register-level probe: only assert that pto.vsqz emits the op. The
     # compacted result is intentionally discarded here — a real compress_store
     # would consume it via pto.init_align + pto.vstur(POST_UPDATE) + pto.vstar
@@ -3174,6 +3181,27 @@ def public_vector_surface_probe(inp_tile: pto.Tile, out_tile: pto.Tile, stats_ti
     pto.vsts(p_row, out_tile[row, 0:], col_mask)
     pto.vsts(row_max, stats_tile.as_ptr(), row, col_mask, dist="1PT_B32")
     pto.vsts(row_sum, stats_tile.as_ptr(), row + 1, col_mask, dist="1PT_B32")
+
+
+@pto.jit(target="a5")
+def vsubc_f32_type_error_probe():
+    lhs = pto.vbr(pto.const(3.0, dtype=pto.f32))
+    rhs = pto.vbr(pto.const(7.0, dtype=pto.f32))
+    pto.vsubc(lhs, rhs, pto.pset_b32(pto.MaskPattern.ALL))
+
+
+@pto.jit(target="a5")
+def vsubc_i16_type_error_probe():
+    lhs = pto.vbr(pto.const(3, dtype=pto.ui16))
+    rhs = pto.vbr(pto.const(7, dtype=pto.ui16))
+    pto.vsubc(lhs, rhs, pto.pset_b16(pto.MaskPattern.ALL))
+
+
+@pto.jit(target="a5")
+def vsubc_mask_granularity_type_error_probe():
+    lhs = pto.vbr(pto.const(3, dtype=pto.ui32))
+    rhs = pto.vbr(pto.const(7, dtype=pto.ui32))
+    pto.vsubc(lhs, rhs, pto.pset_b16(pto.MaskPattern.ALL))
 
 
 @pto.jit(target="a5", entry=False, mode="explicit", kernel_kind="cube")
@@ -3724,7 +3752,13 @@ def vmi_wrapper_dispatch_probe():
     half_max = pto.vmi.vload(half_max_ptr, offset, size=128)
     added = pto.vmi.vadd(lhs, rhs, mask)
     carry_sum, carry = pto.vmi.vaddc(int_lhs, int_rhs, mask)
+    carry_difference_vmi, subtract_carry_vmi = pto.vmi.vsubc(
+        int_lhs, int_rhs, mask
+    )
     carry_next, carry_out = pto.vmi.vaddcs(carry_sum, int_rhs, carry, mask)
+    carry_difference, subtract_carry_out = pto.vmi.vsubcs(
+        int_lhs, int_rhs, carry, mask
+    )
     subtracted = pto.vmi.vsub(lhs, rhs, mask)
     multiplied = pto.vmi.vmul(lhs, rhs, mask)
     divided = pto.vmi.vdiv(lhs, rhs, mask)
@@ -7980,6 +8014,26 @@ def main() -> None:
 
     public_surface_text = public_surface_exports_probe.compile().mlir_text()
     expect_parse_roundtrip_and_verify(public_surface_text, "public surface export specialization")
+    expect("pto.vsubc" in public_surface_text, "vsubc(...) should lower to pto.vsubc")
+    expect("%c3_i32" in public_surface_text and "%c7_i32" in public_surface_text,
+           "vsubc probe should preserve the 3 - 7 semantic fixture")
+    expect("pto.pnot" in public_surface_text,
+           "vsubc probe should consume the returned carry predicate")
+    expect_raises(
+        TypeError,
+        vsubc_f32_type_error_probe.compile,
+        "requires 32-bit integer vector elements",
+    )
+    expect_raises(
+        TypeError,
+        vsubc_i16_type_error_probe.compile,
+        "requires 32-bit integer vector elements",
+    )
+    expect_raises(
+        TypeError,
+        vsubc_mask_granularity_type_error_probe.compile,
+        "requires a b32 mask",
+    )
     explicit_mx_scale_staging_text = explicit_mx_scale_staging_surface_probe.compile().mlir_text()
     expect_parse_roundtrip_and_verify(
         explicit_mx_scale_staging_text,
@@ -8293,7 +8347,9 @@ def main() -> None:
         "pto.vmi.vci",
         "pto.vmi.vadd",
         "pto.vmi.vaddc",
+        "pto.vmi.vsubc",
         "pto.vmi.vaddcs",
+        "pto.vmi.vsubcs",
         "pto.vmi.vsub",
         "pto.vmi.vmul",
         "pto.vmi.vdiv",

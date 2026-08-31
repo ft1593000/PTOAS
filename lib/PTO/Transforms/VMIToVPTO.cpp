@@ -8782,11 +8782,15 @@ struct OneToNVMIVecScalarOpPattern : OneToNOpConversionPattern<SourceOp> {
   }
 };
 
-struct OneToNVMIVaddcOpPattern : OneToNOpConversionPattern<VMIVaddcOp> {
-  using OneToNOpConversionPattern<VMIVaddcOp>::OneToNOpConversionPattern;
+template <typename VMICarryOp, typename CarryOp>
+struct OneToNVMICarryOutputOpPattern
+    : OneToNOpConversionPattern<VMICarryOp> {
+  using OneToNOpConversionPattern<VMICarryOp>::OneToNOpConversionPattern;
 
-  LogicalResult matchAndRewrite(VMIVaddcOp op, OpAdaptor adaptor,
-                                OneToNPatternRewriter &rewriter) const override {
+  LogicalResult matchAndRewrite(
+      VMICarryOp op,
+      typename OneToNOpConversionPattern<VMICarryOp>::OpAdaptor adaptor,
+      OneToNPatternRewriter &rewriter) const override {
     ValueRange lhsParts = adaptor.getLhs();
     ValueRange rhsParts = adaptor.getRhs();
     ValueRange maskParts = adaptor.getMask();
@@ -8803,7 +8807,8 @@ struct OneToNVMIVaddcOpPattern : OneToNOpConversionPattern<VMIVaddcOp> {
         maskParts.size() != lhsParts.size() ||
         resultTypes.size() != lhsParts.size() ||
         carryTypes.size() != lhsParts.size())
-      return rewriter.notifyMatchFailure(op, "vaddc physical arity mismatch");
+      return rewriter.notifyMatchFailure(
+          op, "carry-output operation physical arity mismatch");
 
     SmallVector<Value> results;
     SmallVector<Value> carries;
@@ -8821,12 +8826,12 @@ struct OneToNVMIVaddcOpPattern : OneToNOpConversionPattern<VMIVaddcOp> {
           !cast<MaskType>(carryType).isB32() ||
           lhs.getType() != resultType || rhs.getType() != resultType)
         return rewriter.notifyMatchFailure(
-            op, "vaddc requires matching 32-bit data and b32 mask parts");
+            op, "requires matching 32-bit data and b32 mask parts");
 
-      auto addc = rewriter.create<VaddcOp>(op.getLoc(), resultType, carryType,
-                                           lhs, rhs, mask);
-      results.push_back(addc.getResult());
-      carries.push_back(addc.getCarry());
+      auto carryOp = rewriter.create<CarryOp>(op.getLoc(), resultType,
+                                              carryType, lhs, rhs, mask);
+      results.push_back(carryOp.getResult());
+      carries.push_back(carryOp.getCarry());
     }
 
     results.append(carries);
@@ -8836,10 +8841,14 @@ struct OneToNVMIVaddcOpPattern : OneToNOpConversionPattern<VMIVaddcOp> {
   }
 };
 
-struct OneToNVMIVaddcsOpPattern : OneToNOpConversionPattern<VMIVaddcsOp> {
-  using OneToNOpConversionPattern<VMIVaddcsOp>::OneToNOpConversionPattern;
+template <typename VMICarryOp, typename CarryOp>
+struct OneToNVMICarryInputOpPattern
+    : OneToNOpConversionPattern<VMICarryOp> {
+  using OneToNOpConversionPattern<VMICarryOp>::OneToNOpConversionPattern;
 
-  LogicalResult matchAndRewrite(VMIVaddcsOp op, OpAdaptor adaptor,
+  LogicalResult matchAndRewrite(VMICarryOp op,
+                                typename OneToNOpConversionPattern<
+                                    VMICarryOp>::OpAdaptor adaptor,
                                 OneToNPatternRewriter &rewriter) const override {
     ValueRange lhsParts = adaptor.getLhs();
     ValueRange rhsParts = adaptor.getRhs();
@@ -8859,7 +8868,8 @@ struct OneToNVMIVaddcsOpPattern : OneToNOpConversionPattern<VMIVaddcsOp> {
         maskParts.size() != lhsParts.size() ||
         resultTypes.size() != lhsParts.size() ||
         carryTypes.size() != lhsParts.size())
-      return rewriter.notifyMatchFailure(op, "vaddcs physical arity mismatch");
+      return rewriter.notifyMatchFailure(
+          op, "carry-input operation physical arity mismatch");
 
     SmallVector<Value> results;
     SmallVector<Value> carries;
@@ -8880,12 +8890,12 @@ struct OneToNVMIVaddcsOpPattern : OneToNOpConversionPattern<VMIVaddcsOp> {
           !cast<MaskType>(carryType).isB32() ||
           lhs.getType() != resultType || rhs.getType() != resultType)
         return rewriter.notifyMatchFailure(
-            op, "vaddcs requires matching 32-bit data and b32 mask parts");
+            op, "requires matching 32-bit data and b32 mask parts");
 
-      auto addcs = rewriter.create<VaddcsOp>(op.getLoc(), resultType, carryType,
-                                             lhs, rhs, carryIn, mask);
-      results.push_back(addcs.getResult());
-      carries.push_back(addcs.getCarry());
+      auto carryOp = rewriter.create<CarryOp>(
+          op.getLoc(), resultType, carryType, lhs, rhs, carryIn, mask);
+      results.push_back(carryOp.getResult());
+      carries.push_back(carryOp.getCarry());
     }
 
     results.append(carries);
@@ -12668,7 +12678,10 @@ void populateVMIConversionPatterns(
       OneToNVMIMaskedStoreOpPattern, OneToNVMIStrideStoreOpPattern,
       OneToNVMIScatterOpPattern, OneToNVMIBinaryOpPattern<VMIAddFOp, VaddOp>,
       OneToNVMIBinaryOpPattern<VMIAddIOp, VaddOp>,
-      OneToNVMIVaddcOpPattern, OneToNVMIVaddcsOpPattern,
+      OneToNVMICarryOutputOpPattern<VMIVaddcOp, VaddcOp>,
+      OneToNVMICarryOutputOpPattern<VMIVsubcOp, VsubcOp>,
+      OneToNVMICarryInputOpPattern<VMIVaddcsOp, VaddcsOp>,
+      OneToNVMICarryInputOpPattern<VMIVsubcsOp, VsubcsOp>,
       OneToNVMIBinaryOpPattern<VMISubFOp, VsubOp>,
       OneToNVMIBinaryOpPattern<VMISubIOp, VsubOp>,
       OneToNVMIBinaryOpPattern<VMIMulFOp, VmulOp>,
@@ -13467,8 +13480,20 @@ LogicalResult checkSupportedVMIAddcShape(VMIVaddcOp op,
       reason);
 }
 
-LogicalResult checkSupportedVMIAddcsShape(VMIVaddcsOp op,
-                                          std::string *reason = nullptr) {
+LogicalResult checkSupportedVMISubcShape(VMIVsubcOp op,
+                                         std::string *reason = nullptr) {
+  return checkSupportedVMIAddCarryPorts(
+      cast<VMIVRegType>(op.getLhs().getType()),
+      cast<VMIVRegType>(op.getRhs().getType()),
+      cast<VMIVRegType>(op.getResult().getType()),
+      {cast<VMIMaskType>(op.getMask().getType()),
+       cast<VMIMaskType>(op.getCarry().getType())},
+      reason);
+}
+
+template <typename CarryOp>
+LogicalResult checkSupportedVMICarryInputShape(
+    CarryOp op, std::string *reason = nullptr) {
   return checkSupportedVMIAddCarryPorts(
       cast<VMIVRegType>(op.getLhs().getType()),
       cast<VMIVRegType>(op.getRhs().getType()),
@@ -13899,20 +13924,44 @@ verifySupportedVMIToVPTOOps(ModuleOp module,
           op, "pto.vmi.muli", cast<VMIVRegType>(muli.getResult().getType()));
     if (auto addc = dyn_cast<VMIVaddcOp>(op)) {
       std::string reason;
-      if (succeeded(checkSupportedVMIAddcShape(addc, &reason)))
+      if (succeeded(checkSupportedVMIAddcShape(addc, &reason))) {
         return WalkResult::advance();
+      }
       addc.emitError() << kVMIDiagUnsupportedPrefix
                        << "pto.vmi.vaddc requires matching 32-bit data and "
                           "b32 mask parts ("
                        << reason << ")";
       return WalkResult::interrupt();
     }
+    if (auto subc = dyn_cast<VMIVsubcOp>(op)) {
+      std::string reason;
+      if (succeeded(checkSupportedVMISubcShape(subc, &reason))) {
+        return WalkResult::advance();
+      }
+      subc.emitError() << kVMIDiagUnsupportedPrefix
+                       << "pto.vmi.vsubc requires matching 32-bit data and "
+                          "b32 mask parts ("
+                       << reason << ")";
+      return WalkResult::interrupt();
+    }
     if (auto addcs = dyn_cast<VMIVaddcsOp>(op)) {
       std::string reason;
-      if (succeeded(checkSupportedVMIAddcsShape(addcs, &reason)))
+      if (succeeded(checkSupportedVMICarryInputShape(addcs, &reason))) {
         return WalkResult::advance();
+      }
       addcs.emitError() << kVMIDiagUnsupportedPrefix
                         << "pto.vmi.vaddcs requires matching 32-bit data and "
+                           "b32 mask parts ("
+                        << reason << ")";
+      return WalkResult::interrupt();
+    }
+    if (auto subcs = dyn_cast<VMIVsubcsOp>(op)) {
+      std::string reason;
+      if (succeeded(checkSupportedVMICarryInputShape(subcs, &reason))) {
+        return WalkResult::advance();
+      }
+      subcs.emitError() << kVMIDiagUnsupportedPrefix
+                        << "pto.vmi.vsubcs requires matching 32-bit data and "
                            "b32 mask parts ("
                         << reason << ")";
       return WalkResult::interrupt();

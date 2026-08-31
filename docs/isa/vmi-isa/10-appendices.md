@@ -60,7 +60,9 @@
 | 52 | `pto.vmi.vintlv` | 9: Rearrange | A | Interleave two vectors |
 | 53 | `pto.vmi.vdintlv` | 9: Rearrange | A | Deinterleave two vectors |
 | 54 | `pto.vmi.vaddc` | 3: Eltwise | A | 32-bit integer add with per-lane carry output |
-| 55 | `pto.vmi.vaddcs` | 3: Eltwise | A | 32-bit integer add with carry input and output |
+| 55 | `pto.vmi.vsubc` | 3: Eltwise | A | 32-bit integer subtract with per-lane not-borrow output |
+| 56 | `pto.vmi.vaddcs` | 3: Eltwise | A | 32-bit integer add with carry input and output |
+| 57 | `pto.vmi.vsubcs` | 3: Eltwise | A | 32-bit integer subtract with carry input and output |
 
 ---
 

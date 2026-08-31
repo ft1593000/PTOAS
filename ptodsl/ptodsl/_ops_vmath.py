@@ -93,6 +93,8 @@ from ._ops_common import (
     _normalize_vcvt_round_mode,
     _normalize_vdup_position_mode,
     _pointer_element_type,
+    _require_b32_mask,
+    _require_integer32_vreg_operands,
     _reject_low_precision_vreg_operands,
 )
 
@@ -498,9 +500,25 @@ def vselr(src0, src1):
 
 def vaddc(lhs, rhs, mask):
     """``pto.vaddc`` – vector add with carry-out predicate."""
-    _reject_low_precision_vreg_operands(lhs, rhs, context="pto.vaddc(...)")
+    _require_integer32_vreg_operands(lhs, rhs, context="pto.vaddc(...)")
+    _require_b32_mask(mask, context="pto.vaddc(...)")
     carry_type = unwrap_surface_value(mask).type
     result, carry = _pto.VaddcOp(
+        unwrap_surface_value(lhs).type,
+        carry_type,
+        unwrap_surface_value(lhs),
+        unwrap_surface_value(rhs),
+        unwrap_surface_value(mask),
+    ).results
+    return wrap_surface_value(result), wrap_surface_value(carry)
+
+
+def vsubc(lhs, rhs, mask):
+    """``pto.vsubc`` – vector subtract with carry-out predicate."""
+    _require_integer32_vreg_operands(lhs, rhs, context="pto.vsubc(...)")
+    _require_b32_mask(mask, context="pto.vsubc(...)")
+    carry_type = unwrap_surface_value(mask).type
+    result, carry = _pto.VsubcOp(
         unwrap_surface_value(lhs).type,
         carry_type,
         unwrap_surface_value(lhs),
