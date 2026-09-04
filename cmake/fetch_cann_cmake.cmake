@@ -1,4 +1,3 @@
-# -----------------------------------------------------------------------------------------------------------
 # Copyright (c) 2026 Huawei Technologies Co., Ltd.
 # This program is free software, you can redistribute it and/or modify it under the terms and conditions of
 # CANN Open Software License Agreement Version 2.0 (the "License").
@@ -9,6 +8,11 @@
 # -----------------------------------------------------------------------------------------------------------
 
 if(NOT PROJECT_SOURCE_DIR)
+    if(NOT CANN_3RD_LIB_PATH)
+        set(CANN_3RD_LIB_PATH "${CMAKE_BINARY_DIR}/_deps" CACHE PATH
+            "Directory for CANN third-party dependencies")
+    endif()
+
     # Temporary test pin for cann/cmake MR !277. Revert this URL/ref pair
     # after validation and switch to the released cann/cmake tag once MR !277
     # is merged.
