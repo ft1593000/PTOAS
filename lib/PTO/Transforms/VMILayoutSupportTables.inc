@@ -52,6 +52,14 @@ static constexpr EnsureLayoutPattern kEnsureLayoutPatterns[] = {
     {bits<8>(), anyN(), ls(2), ls(4)},
     {bits<8>(), anyN(), ls(4), ls(2)},
 
+    // A small slots=8 group occupies one physical carrier.  Its active slots
+    // form the same prefix as a dense value, so casts may expose that carrier
+    // as contiguous or unpack it to the dense lane-stride representation.
+    {bits<8, 16, 32>(), N<1, 2, 4, 8>(), gs(8), c()},
+    {bits<8, 16, 32>(), N<1, 2, 4, 8>(), c(), gs(8)},
+    {bits<8, 16>(), N<1, 2, 4, 8>(), gs(8), ls(2)},
+    {bits<8, 16, 32>(), N<2, 4>(), c(), gs(1)},
+
     // Group-slot lane-stride materialization keeps num_groups and slots=8.
     // Each physical part carries at most eight row-local group values, so the
     // conversion is independent of the total logical element count.

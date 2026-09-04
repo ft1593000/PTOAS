@@ -1,0 +1,379 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// RUN: pto-test-opt %s -vmi-lower-unified-to-legacy -vmi-mask-granularity-assignment -vmi-layout-assignment -vmi-to-vpto | FileCheck %s
+
+module {
+  func.func @f16_to_ui8_vl1(
+      %src: !pto.ptr<f16, ub>, %dst: !pto.ptr<ui8, ub>, %offset: index) {
+    %value = pto.vmi.vload %src[%offset]
+        : !pto.ptr<f16, ub> -> !pto.vmi.vreg<1xf16>
+    %converted = pto.vmi.vcvt %value {saturate = "SAT"}
+        : !pto.vmi.vreg<1xf16> -> !pto.vmi.vreg<1xui8>
+    pto.vmi.vstore %converted, %dst[%offset]
+        : !pto.vmi.vreg<1xui8>, !pto.ptr<ui8, ub>
+    return
+  }
+
+  func.func @f16_to_ui8_vl2(
+      %src: !pto.ptr<f16, ub>, %dst: !pto.ptr<ui8, ub>, %offset: index) {
+    %value = pto.vmi.vload %src[%offset]
+        : !pto.ptr<f16, ub> -> !pto.vmi.vreg<2xf16>
+    %converted = pto.vmi.vcvt %value {saturate = "SAT"}
+        : !pto.vmi.vreg<2xf16> -> !pto.vmi.vreg<2xui8>
+    pto.vmi.vstore %converted, %dst[%offset]
+        : !pto.vmi.vreg<2xui8>, !pto.ptr<ui8, ub>
+    return
+  }
+
+  func.func @f16_to_ui8_vl4(
+      %src: !pto.ptr<f16, ub>, %dst: !pto.ptr<ui8, ub>, %offset: index) {
+    %value = pto.vmi.vload %src[%offset]
+        : !pto.ptr<f16, ub> -> !pto.vmi.vreg<4xf16>
+    %converted = pto.vmi.vcvt %value {saturate = "SAT"}
+        : !pto.vmi.vreg<4xf16> -> !pto.vmi.vreg<4xui8>
+    pto.vmi.vstore %converted, %dst[%offset]
+        : !pto.vmi.vreg<4xui8>, !pto.ptr<ui8, ub>
+    return
+  }
+
+  func.func @f16_to_ui8_vl8(
+      %src: !pto.ptr<f16, ub>, %dst: !pto.ptr<ui8, ub>, %offset: index) {
+    %value = pto.vmi.vload %src[%offset]
+        : !pto.ptr<f16, ub> -> !pto.vmi.vreg<8xf16>
+    %converted = pto.vmi.vcvt %value {saturate = "SAT"}
+        : !pto.vmi.vreg<8xf16> -> !pto.vmi.vreg<8xui8>
+    pto.vmi.vstore %converted, %dst[%offset]
+        : !pto.vmi.vreg<8xui8>, !pto.ptr<ui8, ub>
+    return
+  }
+
+  func.func @f16_to_si8_vl1(
+      %src: !pto.ptr<f16, ub>, %dst: !pto.ptr<si8, ub>, %offset: index) {
+    %value = pto.vmi.vload %src[%offset]
+        : !pto.ptr<f16, ub> -> !pto.vmi.vreg<1xf16>
+    %converted = pto.vmi.vcvt %value {saturate = "SAT"}
+        : !pto.vmi.vreg<1xf16> -> !pto.vmi.vreg<1xsi8>
+    pto.vmi.vstore %converted, %dst[%offset]
+        : !pto.vmi.vreg<1xsi8>, !pto.ptr<si8, ub>
+    return
+  }
+
+  func.func @f16_to_si8_vl2(
+      %src: !pto.ptr<f16, ub>, %dst: !pto.ptr<si8, ub>, %offset: index) {
+    %value = pto.vmi.vload %src[%offset]
+        : !pto.ptr<f16, ub> -> !pto.vmi.vreg<2xf16>
+    %converted = pto.vmi.vcvt %value {saturate = "SAT"}
+        : !pto.vmi.vreg<2xf16> -> !pto.vmi.vreg<2xsi8>
+    pto.vmi.vstore %converted, %dst[%offset]
+        : !pto.vmi.vreg<2xsi8>, !pto.ptr<si8, ub>
+    return
+  }
+
+  func.func @f16_to_si8_vl4(
+      %src: !pto.ptr<f16, ub>, %dst: !pto.ptr<si8, ub>, %offset: index) {
+    %value = pto.vmi.vload %src[%offset]
+        : !pto.ptr<f16, ub> -> !pto.vmi.vreg<4xf16>
+    %converted = pto.vmi.vcvt %value {saturate = "SAT"}
+        : !pto.vmi.vreg<4xf16> -> !pto.vmi.vreg<4xsi8>
+    pto.vmi.vstore %converted, %dst[%offset]
+        : !pto.vmi.vreg<4xsi8>, !pto.ptr<si8, ub>
+    return
+  }
+
+  func.func @f16_to_si8_vl8(
+      %src: !pto.ptr<f16, ub>, %dst: !pto.ptr<si8, ub>, %offset: index) {
+    %value = pto.vmi.vload %src[%offset]
+        : !pto.ptr<f16, ub> -> !pto.vmi.vreg<8xf16>
+    %converted = pto.vmi.vcvt %value {saturate = "SAT"}
+        : !pto.vmi.vreg<8xf16> -> !pto.vmi.vreg<8xsi8>
+    pto.vmi.vstore %converted, %dst[%offset]
+        : !pto.vmi.vreg<8xsi8>, !pto.ptr<si8, ub>
+    return
+  }
+
+  func.func @f32_to_si16_vl1(
+      %src: !pto.ptr<f32, ub>, %dst: !pto.ptr<si16, ub>, %offset: index) {
+    %value = pto.vmi.vload %src[%offset]
+        : !pto.ptr<f32, ub> -> !pto.vmi.vreg<1xf32>
+    %converted = pto.vmi.vcvt %value {saturate = "SAT"}
+        : !pto.vmi.vreg<1xf32> -> !pto.vmi.vreg<1xsi16>
+    pto.vmi.vstore %converted, %dst[%offset]
+        : !pto.vmi.vreg<1xsi16>, !pto.ptr<si16, ub>
+    return
+  }
+
+  func.func @f32_to_si16_vl2(
+      %src: !pto.ptr<f32, ub>, %dst: !pto.ptr<si16, ub>, %offset: index) {
+    %value = pto.vmi.vload %src[%offset]
+        : !pto.ptr<f32, ub> -> !pto.vmi.vreg<2xf32>
+    %converted = pto.vmi.vcvt %value {saturate = "SAT"}
+        : !pto.vmi.vreg<2xf32> -> !pto.vmi.vreg<2xsi16>
+    pto.vmi.vstore %converted, %dst[%offset]
+        : !pto.vmi.vreg<2xsi16>, !pto.ptr<si16, ub>
+    return
+  }
+
+  func.func @f32_to_si16_vl4(
+      %src: !pto.ptr<f32, ub>, %dst: !pto.ptr<si16, ub>, %offset: index) {
+    %value = pto.vmi.vload %src[%offset]
+        : !pto.ptr<f32, ub> -> !pto.vmi.vreg<4xf32>
+    %converted = pto.vmi.vcvt %value {saturate = "SAT"}
+        : !pto.vmi.vreg<4xf32> -> !pto.vmi.vreg<4xsi16>
+    pto.vmi.vstore %converted, %dst[%offset]
+        : !pto.vmi.vreg<4xsi16>, !pto.ptr<si16, ub>
+    return
+  }
+
+  func.func @f32_to_si16_vl8(
+      %src: !pto.ptr<f32, ub>, %dst: !pto.ptr<si16, ub>, %offset: index) {
+    %value = pto.vmi.vload %src[%offset]
+        : !pto.ptr<f32, ub> -> !pto.vmi.vreg<8xf32>
+    %converted = pto.vmi.vcvt %value {saturate = "SAT"}
+        : !pto.vmi.vreg<8xf32> -> !pto.vmi.vreg<8xsi16>
+    pto.vmi.vstore %converted, %dst[%offset]
+        : !pto.vmi.vreg<8xsi16>, !pto.ptr<si16, ub>
+    return
+  }
+
+  func.func @bf16_to_si32_vl1(
+      %src: !pto.ptr<bf16, ub>, %dst: !pto.ptr<si32, ub>, %offset: index) {
+    %value = pto.vmi.vload %src[%offset]
+        : !pto.ptr<bf16, ub> -> !pto.vmi.vreg<1xbf16>
+    %converted = pto.vmi.vcvt %value {saturate = "SAT"}
+        : !pto.vmi.vreg<1xbf16> -> !pto.vmi.vreg<1xsi32>
+    pto.vmi.vstore %converted, %dst[%offset]
+        : !pto.vmi.vreg<1xsi32>, !pto.ptr<si32, ub>
+    return
+  }
+
+  func.func @bf16_to_si32_vl2(
+      %src: !pto.ptr<bf16, ub>, %dst: !pto.ptr<si32, ub>, %offset: index) {
+    %value = pto.vmi.vload %src[%offset]
+        : !pto.ptr<bf16, ub> -> !pto.vmi.vreg<2xbf16>
+    %converted = pto.vmi.vcvt %value {saturate = "SAT"}
+        : !pto.vmi.vreg<2xbf16> -> !pto.vmi.vreg<2xsi32>
+    pto.vmi.vstore %converted, %dst[%offset]
+        : !pto.vmi.vreg<2xsi32>, !pto.ptr<si32, ub>
+    return
+  }
+
+  func.func @bf16_to_si32_vl4(
+      %src: !pto.ptr<bf16, ub>, %dst: !pto.ptr<si32, ub>, %offset: index) {
+    %value = pto.vmi.vload %src[%offset]
+        : !pto.ptr<bf16, ub> -> !pto.vmi.vreg<4xbf16>
+    %converted = pto.vmi.vcvt %value {saturate = "SAT"}
+        : !pto.vmi.vreg<4xbf16> -> !pto.vmi.vreg<4xsi32>
+    pto.vmi.vstore %converted, %dst[%offset]
+        : !pto.vmi.vreg<4xsi32>, !pto.ptr<si32, ub>
+    return
+  }
+
+  func.func @bf16_to_si32_vl8(
+      %src: !pto.ptr<bf16, ub>, %dst: !pto.ptr<si32, ub>, %offset: index) {
+    %value = pto.vmi.vload %src[%offset]
+        : !pto.ptr<bf16, ub> -> !pto.vmi.vreg<8xbf16>
+    %converted = pto.vmi.vcvt %value {saturate = "SAT"}
+        : !pto.vmi.vreg<8xbf16> -> !pto.vmi.vreg<8xsi32>
+    pto.vmi.vstore %converted, %dst[%offset]
+        : !pto.vmi.vreg<8xsi32>, !pto.ptr<si32, ub>
+    return
+  }
+
+  func.func @f16_to_f32_vl1(
+      %src: !pto.ptr<f16, ub>, %dst: !pto.ptr<f32, ub>, %offset: index) {
+    %value = pto.vmi.vload %src[%offset]
+        : !pto.ptr<f16, ub> -> !pto.vmi.vreg<1xf16>
+    %converted = pto.vmi.vcvt %value
+        : !pto.vmi.vreg<1xf16> -> !pto.vmi.vreg<1xf32>
+    pto.vmi.vstore %converted, %dst[%offset]
+        : !pto.vmi.vreg<1xf32>, !pto.ptr<f32, ub>
+    return
+  }
+
+  func.func @f16_to_f32_vl2(
+      %src: !pto.ptr<f16, ub>, %dst: !pto.ptr<f32, ub>, %offset: index) {
+    %value = pto.vmi.vload %src[%offset]
+        : !pto.ptr<f16, ub> -> !pto.vmi.vreg<2xf16>
+    %converted = pto.vmi.vcvt %value
+        : !pto.vmi.vreg<2xf16> -> !pto.vmi.vreg<2xf32>
+    pto.vmi.vstore %converted, %dst[%offset]
+        : !pto.vmi.vreg<2xf32>, !pto.ptr<f32, ub>
+    return
+  }
+
+  func.func @f16_to_f32_vl4(
+      %src: !pto.ptr<f16, ub>, %dst: !pto.ptr<f32, ub>, %offset: index) {
+    %value = pto.vmi.vload %src[%offset]
+        : !pto.ptr<f16, ub> -> !pto.vmi.vreg<4xf16>
+    %converted = pto.vmi.vcvt %value
+        : !pto.vmi.vreg<4xf16> -> !pto.vmi.vreg<4xf32>
+    pto.vmi.vstore %converted, %dst[%offset]
+        : !pto.vmi.vreg<4xf32>, !pto.ptr<f32, ub>
+    return
+  }
+
+  func.func @f16_to_f32_vl8(
+      %src: !pto.ptr<f16, ub>, %dst: !pto.ptr<f32, ub>, %offset: index) {
+    %value = pto.vmi.vload %src[%offset]
+        : !pto.ptr<f16, ub> -> !pto.vmi.vreg<8xf16>
+    %converted = pto.vmi.vcvt %value
+        : !pto.vmi.vreg<8xf16> -> !pto.vmi.vreg<8xf32>
+    pto.vmi.vstore %converted, %dst[%offset]
+        : !pto.vmi.vreg<8xf32>, !pto.ptr<f32, ub>
+    return
+  }
+
+  func.func @bf16_to_f32_vl1(
+      %src: !pto.ptr<bf16, ub>, %dst: !pto.ptr<f32, ub>, %offset: index) {
+    %value = pto.vmi.vload %src[%offset]
+        : !pto.ptr<bf16, ub> -> !pto.vmi.vreg<1xbf16>
+    %converted = pto.vmi.vcvt %value
+        : !pto.vmi.vreg<1xbf16> -> !pto.vmi.vreg<1xf32>
+    pto.vmi.vstore %converted, %dst[%offset]
+        : !pto.vmi.vreg<1xf32>, !pto.ptr<f32, ub>
+    return
+  }
+
+  func.func @bf16_to_f32_vl2(
+      %src: !pto.ptr<bf16, ub>, %dst: !pto.ptr<f32, ub>, %offset: index) {
+    %value = pto.vmi.vload %src[%offset]
+        : !pto.ptr<bf16, ub> -> !pto.vmi.vreg<2xbf16>
+    %converted = pto.vmi.vcvt %value
+        : !pto.vmi.vreg<2xbf16> -> !pto.vmi.vreg<2xf32>
+    pto.vmi.vstore %converted, %dst[%offset]
+        : !pto.vmi.vreg<2xf32>, !pto.ptr<f32, ub>
+    return
+  }
+
+  func.func @bf16_to_f32_vl4(
+      %src: !pto.ptr<bf16, ub>, %dst: !pto.ptr<f32, ub>, %offset: index) {
+    %value = pto.vmi.vload %src[%offset]
+        : !pto.ptr<bf16, ub> -> !pto.vmi.vreg<4xbf16>
+    %converted = pto.vmi.vcvt %value
+        : !pto.vmi.vreg<4xbf16> -> !pto.vmi.vreg<4xf32>
+    pto.vmi.vstore %converted, %dst[%offset]
+        : !pto.vmi.vreg<4xf32>, !pto.ptr<f32, ub>
+    return
+  }
+
+  func.func @bf16_to_f32_vl8(
+      %src: !pto.ptr<bf16, ub>, %dst: !pto.ptr<f32, ub>, %offset: index) {
+    %value = pto.vmi.vload %src[%offset]
+        : !pto.ptr<bf16, ub> -> !pto.vmi.vreg<8xbf16>
+    %converted = pto.vmi.vcvt %value
+        : !pto.vmi.vreg<8xbf16> -> !pto.vmi.vreg<8xf32>
+    pto.vmi.vstore %converted, %dst[%offset]
+        : !pto.vmi.vreg<8xf32>, !pto.ptr<f32, ub>
+    return
+  }
+
+  func.func @bf16_to_f16_vl1(
+      %src: !pto.ptr<bf16, ub>, %dst: !pto.ptr<f16, ub>, %offset: index) {
+    %value = pto.vmi.vload %src[%offset]
+        : !pto.ptr<bf16, ub> -> !pto.vmi.vreg<1xbf16>
+    %converted = pto.vmi.vcvt %value {saturate = "SAT"}
+        : !pto.vmi.vreg<1xbf16> -> !pto.vmi.vreg<1xf16>
+    pto.vmi.vstore %converted, %dst[%offset]
+        : !pto.vmi.vreg<1xf16>, !pto.ptr<f16, ub>
+    return
+  }
+
+  func.func @bf16_to_f16_vl2(
+      %src: !pto.ptr<bf16, ub>, %dst: !pto.ptr<f16, ub>, %offset: index) {
+    %value = pto.vmi.vload %src[%offset]
+        : !pto.ptr<bf16, ub> -> !pto.vmi.vreg<2xbf16>
+    %converted = pto.vmi.vcvt %value {saturate = "SAT"}
+        : !pto.vmi.vreg<2xbf16> -> !pto.vmi.vreg<2xf16>
+    pto.vmi.vstore %converted, %dst[%offset]
+        : !pto.vmi.vreg<2xf16>, !pto.ptr<f16, ub>
+    return
+  }
+
+  func.func @bf16_to_f16_vl4(
+      %src: !pto.ptr<bf16, ub>, %dst: !pto.ptr<f16, ub>, %offset: index) {
+    %value = pto.vmi.vload %src[%offset]
+        : !pto.ptr<bf16, ub> -> !pto.vmi.vreg<4xbf16>
+    %converted = pto.vmi.vcvt %value {saturate = "SAT"}
+        : !pto.vmi.vreg<4xbf16> -> !pto.vmi.vreg<4xf16>
+    pto.vmi.vstore %converted, %dst[%offset]
+        : !pto.vmi.vreg<4xf16>, !pto.ptr<f16, ub>
+    return
+  }
+
+  func.func @bf16_to_f16_vl8(
+      %src: !pto.ptr<bf16, ub>, %dst: !pto.ptr<f16, ub>, %offset: index) {
+    %value = pto.vmi.vload %src[%offset]
+        : !pto.ptr<bf16, ub> -> !pto.vmi.vreg<8xbf16>
+    %converted = pto.vmi.vcvt %value {saturate = "SAT"}
+        : !pto.vmi.vreg<8xbf16> -> !pto.vmi.vreg<8xf16>
+    pto.vmi.vstore %converted, %dst[%offset]
+        : !pto.vmi.vreg<8xf16>, !pto.ptr<f16, ub>
+    return
+  }
+}
+
+// CHECK-LABEL: func.func @f16_to_ui8_vl1(
+// CHECK: pto.vcvt {{.*}} {part = "EVEN", rnd = "R", sat = "SAT"}
+// CHECK-LABEL: func.func @f16_to_ui8_vl2(
+// CHECK: pto.vcvt {{.*}} {part = "EVEN", rnd = "R", sat = "SAT"}
+// CHECK-LABEL: func.func @f16_to_ui8_vl4(
+// CHECK: pto.vcvt {{.*}} {part = "EVEN", rnd = "R", sat = "SAT"}
+// CHECK-LABEL: func.func @f16_to_ui8_vl8(
+// CHECK: pto.vcvt {{.*}} {part = "EVEN", rnd = "R", sat = "SAT"}
+// CHECK-LABEL: func.func @f16_to_si8_vl1(
+// CHECK: pto.vcvt {{.*}} {part = "EVEN", rnd = "R", sat = "SAT"}
+// CHECK-LABEL: func.func @f16_to_si8_vl2(
+// CHECK: pto.vcvt {{.*}} {part = "EVEN", rnd = "R", sat = "SAT"}
+// CHECK-LABEL: func.func @f16_to_si8_vl4(
+// CHECK: pto.vcvt {{.*}} {part = "EVEN", rnd = "R", sat = "SAT"}
+// CHECK-LABEL: func.func @f16_to_si8_vl8(
+// CHECK: pto.vcvt {{.*}} {part = "EVEN", rnd = "R", sat = "SAT"}
+// CHECK-LABEL: func.func @f32_to_si16_vl1(
+// CHECK: pto.vcvt {{.*}} {part = "EVEN", rnd = "R", sat = "SAT"}
+// CHECK-LABEL: func.func @f32_to_si16_vl2(
+// CHECK: pto.vcvt {{.*}} {part = "EVEN", rnd = "R", sat = "SAT"}
+// CHECK-LABEL: func.func @f32_to_si16_vl4(
+// CHECK: pto.vcvt {{.*}} {part = "EVEN", rnd = "R", sat = "SAT"}
+// CHECK-LABEL: func.func @f32_to_si16_vl8(
+// CHECK: pto.vcvt {{.*}} {part = "EVEN", rnd = "R", sat = "SAT"}
+// CHECK-LABEL: func.func @bf16_to_si32_vl1(
+// CHECK: pto.vcvt {{.*}} {part = "EVEN", rnd = "R", sat = "SAT"}
+// CHECK-LABEL: func.func @bf16_to_si32_vl2(
+// CHECK: pto.vcvt {{.*}} {part = "EVEN", rnd = "R", sat = "SAT"}
+// CHECK-LABEL: func.func @bf16_to_si32_vl4(
+// CHECK: pto.vcvt {{.*}} {part = "EVEN", rnd = "R", sat = "SAT"}
+// CHECK-LABEL: func.func @bf16_to_si32_vl8(
+// CHECK: pto.vcvt {{.*}} {part = "EVEN", rnd = "R", sat = "SAT"}
+// CHECK-LABEL: func.func @f16_to_f32_vl1(
+// CHECK: pto.vcvt {{.*}} {part = "EVEN"}
+// CHECK-LABEL: func.func @f16_to_f32_vl2(
+// CHECK: pto.vcvt {{.*}} {part = "EVEN"}
+// CHECK-LABEL: func.func @f16_to_f32_vl4(
+// CHECK: pto.vcvt {{.*}} {part = "EVEN"}
+// CHECK-LABEL: func.func @f16_to_f32_vl8(
+// CHECK: pto.vcvt {{.*}} {part = "EVEN"}
+// CHECK-LABEL: func.func @bf16_to_f32_vl1(
+// CHECK: pto.vcvt {{.*}} {part = "EVEN"}
+// CHECK-LABEL: func.func @bf16_to_f32_vl2(
+// CHECK: pto.vcvt {{.*}} {part = "EVEN"}
+// CHECK-LABEL: func.func @bf16_to_f32_vl4(
+// CHECK: pto.vcvt {{.*}} {part = "EVEN"}
+// CHECK-LABEL: func.func @bf16_to_f32_vl8(
+// CHECK: pto.vcvt {{.*}} {part = "EVEN"}
+// CHECK-LABEL: func.func @bf16_to_f16_vl1(
+// CHECK: pto.vcvt {{.*}} {rnd = "R", sat = "SAT"}
+// CHECK-LABEL: func.func @bf16_to_f16_vl2(
+// CHECK: pto.vcvt {{.*}} {rnd = "R", sat = "SAT"}
+// CHECK-LABEL: func.func @bf16_to_f16_vl4(
+// CHECK: pto.vcvt {{.*}} {rnd = "R", sat = "SAT"}
+// CHECK-LABEL: func.func @bf16_to_f16_vl8(
+// CHECK: pto.vcvt {{.*}} {rnd = "R", sat = "SAT"}
+// CHECK-NOT: pto.vmi.
+// CHECK-NOT: !pto.vmi.
+// CHECK-NOT: unrealized_conversion_cast

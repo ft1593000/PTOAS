@@ -3957,6 +3957,67 @@ FailureOr<SmallVector<Value>> materializeGroupSlotLaneStride(
   return results;
 }
 
+FailureOr<SmallVector<Value>> materializeContiguousToSingleSlotGroups(
+    Operation *op, ValueRange sourceParts, TypeRange resultTypes,
+    PatternRewriter &rewriter) {
+  bool hasSingleSource = sourceParts.size() == 1;
+  bool hasResults = !resultTypes.empty();
+  if (!(hasSingleSource && hasResults)) {
+    (void)rewriter.notifyMatchFailure(
+        op, "contiguous to single-slot groups requires one source part and "
+            "at least one result part");
+    return failure();
+  }
+
+  auto sourceType = dyn_cast<VRegType>(sourceParts.front().getType());
+  if (!sourceType) {
+    (void)rewriter.notifyMatchFailure(
+        op, "contiguous to single-slot groups requires a vreg source");
+    return failure();
+  }
+  unsigned elementBits =
+      pto::getPTOStorageElemBitWidth(sourceType.getElementType());
+  if (elementBits != 8 && elementBits != 16 && elementBits != 32) {
+    (void)rewriter.notifyMatchFailure(
+        op, "unsupported single-slot group carrier element width");
+    return failure();
+  }
+
+  auto indexElementType = IntegerType::get(rewriter.getContext(), elementBits);
+  auto indexType = VRegType::get(rewriter.getContext(),
+                                 sourceType.getElementCount(), indexElementType);
+  FailureOr<Value> mask =
+      createAllTrueMaskForVReg(op->getLoc(), indexType, rewriter);
+  if (failed(mask)) {
+    return failure();
+  }
+
+  SmallVector<Value> results;
+  results.reserve(resultTypes.size());
+  for (auto [group, resultType] : llvm::enumerate(resultTypes)) {
+    if (resultType != sourceType) {
+      (void)rewriter.notifyMatchFailure(
+          op, "single-slot group result must match the source carrier type");
+      return failure();
+    }
+    FailureOr<Value> index = createScalarOffsetConstant(
+        op->getLoc(), indexElementType, group, rewriter);
+    if (failed(index)) {
+      return failure();
+    }
+    Value indices =
+        rewriter
+            .create<VdupOp>(op->getLoc(), indexType, *index, *mask,
+                            /*position=*/nullptr)
+            .getResult();
+    results.push_back(rewriter
+                          .create<VselrOp>(op->getLoc(), sourceType,
+                                           sourceParts.front(), indices)
+                          .getResult());
+  }
+  return results;
+}
+
 FailureOr<SmallVector<Value>> materializeDataLayoutConversion(
     Operation *op, ValueRange sourceParts, TypeRange resultTypes,
     VMILayoutAttr sourceLayout, VMILayoutAttr resultLayout,
@@ -3987,6 +4048,40 @@ FailureOr<SmallVector<Value>> materializeDataLayoutConversion(
                                             rewriter)))
       return failure();
     return SmallVector<Value>(sourceParts.begin(), sourceParts.end());
+  }
+
+  bool smallGroupToContiguous =
+      sourceLayout.isGroupSlots() && sourceLayout.getLaneStride() == 1 &&
+      sourceLayout.getSlots() == 8 && resultLayout.isContiguous() &&
+      resultLayout.getLaneStride() == 1;
+  bool smallContiguousToGroup =
+      sourceLayout.isContiguous() && sourceLayout.getLaneStride() == 1 &&
+      resultLayout.isGroupSlots() && resultLayout.getLaneStride() == 1 &&
+      resultLayout.getSlots() == 8;
+  if (smallGroupToContiguous || smallContiguousToGroup) {
+    if (failed(verifyIdentityPartForwarding(op, sourceParts, resultTypes,
+                                            rewriter))) {
+      return failure();
+    }
+    return SmallVector<Value>(sourceParts.begin(), sourceParts.end());
+  }
+
+  bool groupToLaneStride =
+      sourceLayout.isGroupSlots() && sourceLayout.getLaneStride() == 1 &&
+      sourceLayout.getSlots() == 8 && resultLayout.isContiguous() &&
+      resultLayout.getLaneStride() != 1;
+  if (groupToLaneStride) {
+    return materializeContiguousToLaneStride(
+        op, sourceParts, resultTypes, sourceVMIElementType,
+        resultLayout.getLaneStride(), rewriter);
+  }
+
+  bool contiguousToSingleSlotGroups =
+      sourceLayout.isContiguous() && sourceLayout.getLaneStride() == 1 &&
+      resultLayout.isGroupSlots() && resultLayout.getSlots() == 1;
+  if (contiguousToSingleSlotGroups) {
+    return materializeContiguousToSingleSlotGroups(
+        op, sourceParts, resultTypes, rewriter);
   }
 
   if (sourceLayout.isGroupSlots() && resultLayout.isGroupSlots() &&
@@ -11572,9 +11667,11 @@ struct OneToNVMITruncFOpPattern : OneToNOpConversionPattern<VMITruncFOp> {
           op, "unsupported physical truncf source/result width relation");
     }
 
-    int64_t resultLaneStride = resultLayout && resultLayout.isContiguous()
-                                   ? resultLayout.getLaneStride()
-                                   : 1;
+    int64_t resultLaneStride =
+        resultLayout &&
+                (resultLayout.isContiguous() || resultLayout.isGroupSlots())
+            ? resultLayout.getLaneStride()
+            : 1;
     if (resultLaneStride <= 0 || factor % resultLaneStride != 0)
       return rewriter.notifyMatchFailure(
           op, "unsupported physical truncf result lane stride");
@@ -12419,9 +12516,11 @@ struct OneToNVMIFPToSIOpPattern : OneToNOpConversionPattern<VMIFPToSIOp> {
     // Narrow: sourceFactor source chunks merge into 1 result chunk.
     int64_t factor = srcBits / dstBits; // 2 for 32→16 or 16→8
     VMILayoutAttr resultLayout = resultVMIType.getLayoutAttr();
-    int64_t resultLaneStride = resultLayout && resultLayout.isContiguous()
-                                   ? resultLayout.getLaneStride()
-                                   : 1;
+    int64_t resultLaneStride =
+        resultLayout &&
+                (resultLayout.isContiguous() || resultLayout.isGroupSlots())
+            ? resultLayout.getLaneStride()
+            : 1;
     if (resultLaneStride <= 0 || factor % resultLaneStride != 0)
       return rewriter.notifyMatchFailure(
           op, "narrow fptosi: unsupported result lane stride");
@@ -12605,9 +12704,11 @@ struct OneToNVMIFPToUIOpPattern
     if (dstBits < srcBits) {
       int64_t factor = srcBits / dstBits; // 2 for 16→8
       VMILayoutAttr resultLayout = resultVMIType.getLayoutAttr();
-      int64_t resultLaneStride = resultLayout && resultLayout.isContiguous()
-                                     ? resultLayout.getLaneStride()
-                                     : 1;
+      int64_t resultLaneStride =
+          resultLayout &&
+                  (resultLayout.isContiguous() || resultLayout.isGroupSlots())
+              ? resultLayout.getLaneStride()
+              : 1;
       if (resultLaneStride <= 0 || factor % resultLaneStride != 0)
         return rewriter.notifyMatchFailure(
             op, "narrow fptoui: unsupported result lane stride");
