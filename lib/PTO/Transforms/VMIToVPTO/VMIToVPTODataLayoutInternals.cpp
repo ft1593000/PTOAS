@@ -100,6 +100,80 @@ FailureOr<SmallVector<Value>> materializeGroupSlotLaneStride(
   return results;
 }
 
+FailureOr<Value> materializeContiguousToSingleSlotGroup(
+    Operation *op, Value source, Type resultType, VRegType sourceType,
+    IntegerType indexElementType, VRegType indexType, Value mask,
+    int64_t group, PatternRewriter &rewriter) {
+  if (resultType != sourceType) {
+    (void)rewriter.notifyMatchFailure(
+        op, "single-slot group result must match the source carrier type");
+    return failure();
+  }
+
+  FailureOr<Value> index = createScalarOffsetConstant(
+      op->getLoc(), indexElementType, group, rewriter);
+  if (failed(index)) {
+    return failure();
+  }
+  Value indices =
+      rewriter
+          .create<VdupOp>(op->getLoc(), indexType, *index, mask,
+                          /*position=*/nullptr)
+          .getResult();
+  return rewriter
+      .create<VselrOp>(op->getLoc(), sourceType, source, indices)
+      .getResult();
+}
+
+FailureOr<SmallVector<Value>> materializeContiguousToSingleSlotGroups(
+    Operation *op, ValueRange sourceParts, TypeRange resultTypes,
+    PatternRewriter &rewriter) {
+  bool hasSingleSource = sourceParts.size() == 1;
+  bool hasResults = !resultTypes.empty();
+  if (!(hasSingleSource && hasResults)) {
+    (void)rewriter.notifyMatchFailure(
+        op, "contiguous to single-slot groups requires one source part and "
+            "at least one result part");
+    return failure();
+  }
+
+  auto sourceType = dyn_cast<VRegType>(sourceParts.front().getType());
+  if (!sourceType) {
+    (void)rewriter.notifyMatchFailure(
+        op, "contiguous to single-slot groups requires a vreg source");
+    return failure();
+  }
+  unsigned elementBits =
+      pto::getPTOStorageElemBitWidth(sourceType.getElementType());
+  if (elementBits != 8 && elementBits != 16 && elementBits != 32) {
+    (void)rewriter.notifyMatchFailure(
+        op, "unsupported single-slot group carrier element width");
+    return failure();
+  }
+
+  auto indexElementType = IntegerType::get(rewriter.getContext(), elementBits);
+  auto indexType = VRegType::get(rewriter.getContext(),
+                                 sourceType.getElementCount(), indexElementType);
+  FailureOr<Value> mask =
+      createAllTrueMaskForVReg(op->getLoc(), indexType, rewriter);
+  if (failed(mask)) {
+    return failure();
+  }
+
+  SmallVector<Value> results;
+  results.reserve(resultTypes.size());
+  for (auto [group, resultType] : llvm::enumerate(resultTypes)) {
+    FailureOr<Value> result = materializeContiguousToSingleSlotGroup(
+        op, sourceParts.front(), resultType, sourceType, indexElementType,
+        indexType, *mask, group, rewriter);
+    if (failed(result)) {
+      return failure();
+    }
+    results.push_back(*result);
+  }
+  return results;
+}
+
 static FailureOr<std::optional<SmallVector<Value>>> forwardIdentityLayoutParts(
     Operation *op, ValueRange sourceParts, TypeRange resultTypes,
     PatternRewriter &rewriter) {
@@ -180,6 +254,60 @@ materializeBlockLayoutForwarding(Operation *op, ValueRange sourceParts,
 }
 
 static FailureOr<std::optional<SmallVector<Value>>>
+materializeGroupDenseLayoutConversion(
+    Operation *op, ValueRange sourceParts, TypeRange resultTypes,
+    VMILayoutAttr sourceLayout, VMILayoutAttr resultLayout,
+    Type sourceVMIElementType, PatternRewriter &rewriter) {
+  bool smallGroupToContiguous =
+      sourceLayout.isGroupSlots() && sourceLayout.getLaneStride() == 1 &&
+      sourceLayout.getSlots() == 8 && resultLayout.isContiguous() &&
+      resultLayout.getLaneStride() == 1;
+  bool smallContiguousToGroup =
+      sourceLayout.isContiguous() && sourceLayout.getLaneStride() == 1 &&
+      resultLayout.isGroupSlots() && resultLayout.getLaneStride() == 1 &&
+      resultLayout.getSlots() == 8;
+  if (smallGroupToContiguous || smallContiguousToGroup) {
+    return forwardIdentityLayoutParts(op, sourceParts, resultTypes, rewriter);
+  }
+
+  bool groupToLaneStride =
+      sourceLayout.isGroupSlots() && sourceLayout.getLaneStride() == 1 &&
+      sourceLayout.getSlots() == 8 && resultLayout.isContiguous() &&
+      resultLayout.getLaneStride() != 1;
+  if (groupToLaneStride) {
+    FailureOr<SmallVector<Value>> result = materializeContiguousToLaneStride(
+        op, sourceParts, resultTypes, sourceVMIElementType,
+        resultLayout.getLaneStride(), rewriter);
+    if (failed(result)) {
+      return failure();
+    }
+    return std::optional<SmallVector<Value>>(std::move(*result));
+  }
+
+  FailureOr<int64_t> carrierLanes = getDataLanesPerPart(sourceVMIElementType);
+  bool singleCarrierAlias =
+      succeeded(carrierLanes) &&
+      isVMISingleCarrierGroupSlotAlias(sourceLayout, resultLayout,
+                                       *carrierLanes);
+  if (singleCarrierAlias) {
+    return forwardIdentityLayoutParts(op, sourceParts, resultTypes, rewriter);
+  }
+
+  bool contiguousToSingleSlotGroups =
+      sourceLayout.isContiguous() && sourceLayout.getLaneStride() == 1 &&
+      resultLayout.isGroupSlots() && resultLayout.getSlots() == 1;
+  if (!contiguousToSingleSlotGroups) {
+    return std::optional<SmallVector<Value>>{};
+  }
+  FailureOr<SmallVector<Value>> result = materializeContiguousToSingleSlotGroups(
+      op, sourceParts, resultTypes, rewriter);
+  if (failed(result)) {
+    return failure();
+  }
+  return std::optional<SmallVector<Value>>(std::move(*result));
+}
+
+static FailureOr<std::optional<SmallVector<Value>>>
 materializeSimpleDataLayoutConversion(
     Operation *op, ValueRange sourceParts, TypeRange resultTypes,
     VMILayoutAttr sourceLayout, VMILayoutAttr resultLayout,
@@ -194,14 +322,15 @@ materializeSimpleDataLayoutConversion(
     return forwardIdentityLayoutParts(op, sourceParts, resultTypes, rewriter);
   }
 
-  // A compact group packet and a dense value share the same carrier lanes.
-  FailureOr<int64_t> carrierLanes = getDataLanesPerPart(sourceVMIElementType);
-  const bool singleCarrierAlias =
-      succeeded(carrierLanes) &&
-      isVMISingleCarrierGroupSlotAlias(sourceLayout, resultLayout,
-                                       *carrierLanes);
-  if (singleCarrierAlias) {
-    return forwardIdentityLayoutParts(op, sourceParts, resultTypes, rewriter);
+  FailureOr<std::optional<SmallVector<Value>>> groupDense =
+      materializeGroupDenseLayoutConversion(
+          op, sourceParts, resultTypes, sourceLayout, resultLayout,
+          sourceVMIElementType, rewriter);
+  if (failed(groupDense)) {
+    return failure();
+  }
+  if (groupDense->has_value()) {
+    return std::optional<SmallVector<Value>>(std::move(**groupDense));
   }
 
   FailureOr<std::optional<SmallVector<Value>>> groupSlot =

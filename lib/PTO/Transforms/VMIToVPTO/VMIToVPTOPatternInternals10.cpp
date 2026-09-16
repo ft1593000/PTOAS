@@ -659,9 +659,11 @@ private:
     } else {
         return rewriter.notifyMatchFailure(op, "unsupported physical truncf source/result width relation");
     }
-    int64_t resultLaneStride = resultLayout && resultLayout.isContiguous()
-                                   ? resultLayout.getLaneStride()
-                                   : 1;
+    int64_t resultLaneStride =
+        resultLayout &&
+                (resultLayout.isContiguous() || resultLayout.isGroupSlots())
+            ? resultLayout.getLaneStride()
+            : 1;
     bool invalidResultLaneStride =
         resultLaneStride <= 0 || factor % resultLaneStride != 0;
     if (invalidResultLaneStride) {

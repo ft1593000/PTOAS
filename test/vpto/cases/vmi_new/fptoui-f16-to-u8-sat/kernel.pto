@@ -39,6 +39,38 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
     pto.wait_flag["PIPE_MTE2", "PIPE_V", "EVENT_ID0"]
 
     pto.vecscope {
+      // Keep the four small cross-width FpToUi shapes in this end-to-end
+      // kernel.  dce6afea did not lower these group-slot layouts, leaving a
+      // VMI residual during native compilation.  The final full-width store
+      // below overwrites these probe stores, preserving this case's data
+      // contract while still requiring every short conversion to lower.
+      %c1 = arith.constant 1 : index
+      %c3 = arith.constant 3 : index
+      %c7 = arith.constant 7 : index
+      %short1 = pto.vmi.vload %ub_src[%c0]
+          : !pto.ptr<f16, ub> -> !pto.vmi.vreg<1xf16>
+      %narrow1 = pto.vmi.vcvt %short1 {saturate = "SAT"}
+          : !pto.vmi.vreg<1xf16> -> !pto.vmi.vreg<1xui8>
+      pto.vmi.vstore %narrow1, %ub_dst[%c0]
+          : !pto.vmi.vreg<1xui8>, !pto.ptr<ui8, ub>
+      %short2 = pto.vmi.vload %ub_src[%c0]
+          : !pto.ptr<f16, ub> -> !pto.vmi.vreg<2xf16>
+      %narrow2 = pto.vmi.vcvt %short2 {saturate = "SAT"}
+          : !pto.vmi.vreg<2xf16> -> !pto.vmi.vreg<2xui8>
+      pto.vmi.vstore %narrow2, %ub_dst[%c1]
+          : !pto.vmi.vreg<2xui8>, !pto.ptr<ui8, ub>
+      %short4 = pto.vmi.vload %ub_src[%c0]
+          : !pto.ptr<f16, ub> -> !pto.vmi.vreg<4xf16>
+      %narrow4 = pto.vmi.vcvt %short4 {saturate = "SAT"}
+          : !pto.vmi.vreg<4xf16> -> !pto.vmi.vreg<4xui8>
+      pto.vmi.vstore %narrow4, %ub_dst[%c3]
+          : !pto.vmi.vreg<4xui8>, !pto.ptr<ui8, ub>
+      %short8 = pto.vmi.vload %ub_src[%c0]
+          : !pto.ptr<f16, ub> -> !pto.vmi.vreg<8xf16>
+      %narrow8 = pto.vmi.vcvt %short8 {saturate = "SAT"}
+          : !pto.vmi.vreg<8xf16> -> !pto.vmi.vreg<8xui8>
+      pto.vmi.vstore %narrow8, %ub_dst[%c7]
+          : !pto.vmi.vreg<8xui8>, !pto.ptr<ui8, ub>
       %wide = pto.vmi.vload %ub_src[%c0] : !pto.ptr<f16, ub> -> !pto.vmi.vreg<256xf16>
       // FpToUi: f16 -> u8 with SAT.  V300 SAT policy:
       //   negatives → 0,  >255 → 255,  NaN → 0,  +inf → 255,  -inf → 0.
