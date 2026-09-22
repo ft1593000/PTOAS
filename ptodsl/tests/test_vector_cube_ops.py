@@ -426,6 +426,7 @@ class VectorCubeSurfaceTest(unittest.TestCase):
         preferred_names = [
             "set_cross_block", "wait_cross_block",
             "set_intra_block", "wait_intra_block",
+            "syncall",
         ]
         legacy_names = [
             "set_cross_flag", "wait_cross_flag",
@@ -443,6 +444,127 @@ class VectorCubeSurfaceTest(unittest.TestCase):
     def test_cross_block_sync_rejects_ffts_mode(self):
         with self.assertRaises(TypeError):
             _ops.set_cross_block(pto.Pipe.FIX, 0, ffts_mode=2)
+
+    def test_cross_block_scalar_wait_requires_a5_and_forwards(self):
+        with patch_ops("_require_target_arch") as require_target_arch, \
+             patch_ops("_pipe_attr", return_value="pipe-s"), \
+             patch("ptodsl._ops_simt._pto.wait_cross_block") as wait_op:
+            _ops.wait_cross_block(pto.Pipe.S, 14)
+
+        require_target_arch.assert_called_once_with(
+            "wait_cross_block(Pipe.S, event_id)", {"a5"}
+        )
+        wait_op.assert_called_once_with("pipe-s", 14)
+
+    def test_syncall_rejects_invalid_surface_contracts(self):
+        cases = [
+            ({"mode": "invalid", "core_type": "aiv_only"}, "expected hard or soft"),
+            (
+                {"mode": "hard", "core_type": "invalid"},
+                "expected aiv_only, aic_only, or mix",
+            ),
+            (
+                {"mode": "hard", "core_type": "aiv_only", "gm_workspace": object()},
+                "does not accept gm_workspace or used_cores",
+            ),
+            ({"mode": "soft", "core_type": "aiv_only"}, "requires gm_workspace"),
+        ]
+
+        for kwargs, expected in cases:
+            with self.subTest(kwargs=kwargs):
+                with self.assertRaises(ValueError) as exc:
+                    _ops.syncall(**kwargs)
+                self.assertIn(expected, str(exc.exception))
+
+        with self.assertRaises(TypeError):
+            _ops.syncall()
+
+    def test_syncall_hard_paths_forward_attributes(self):
+        attr = SimpleNamespace(parse=lambda text: text)
+
+        with patch.object(_ops_simt, "Attribute", attr), \
+             patch("ptodsl._ops_simt._pto.syncall") as syncall_op:
+            _ops.syncall(mode="hard", core_type="aiv_only")
+            _ops.syncall(mode="hard", core_type="aic_only")
+            _ops.syncall(mode="hard", core_type="mix")
+
+        self.assertEqual(
+            syncall_op.call_args_list,
+            [
+                call("#pto.sync_all_mode<hard>", "#pto.sync_core_type<aiv_only>"),
+                call("#pto.sync_all_mode<hard>", "#pto.sync_core_type<aic_only>"),
+                call("#pto.sync_all_mode<hard>", "#pto.sync_core_type<mix>"),
+            ],
+        )
+
+    def test_syncall_soft_static_used_cores_forwards_operands(self):
+        attr = SimpleNamespace(parse=lambda text: text)
+        workspace = object()
+        raw_workspace = object()
+
+        with patch.object(_ops_simt, "Attribute", attr), \
+             patch_ops("unwrap_surface_value", return_value=raw_workspace), \
+             patch_ops(
+                 "_coerce_i32_operand",
+                 side_effect=lambda value, *, context: f"i32:{value}",
+             ), \
+             patch("ptodsl._ops_simt._pto.syncall") as syncall_op:
+            _ops.syncall(
+                mode="soft",
+                core_type="aiv_only",
+                gm_workspace=workspace,
+                used_cores=4,
+            )
+
+        syncall_op.assert_called_once_with(
+            "#pto.sync_all_mode<soft>",
+            "#pto.sync_core_type<aiv_only>",
+            gm_workspace=raw_workspace,
+            used_cores="i32:4",
+        )
+
+    def test_syncall_soft_dynamic_and_omitted_used_cores_forward(self):
+        attr = SimpleNamespace(parse=lambda text: text)
+        workspace = object()
+        raw_workspace = object()
+        dynamic_used_cores = object()
+        coerced_dynamic_used_cores = object()
+
+        with patch.object(_ops_simt, "Attribute", attr), \
+             patch_ops("unwrap_surface_value", return_value=raw_workspace), \
+             patch_ops(
+                 "_coerce_i32_operand",
+                 return_value=coerced_dynamic_used_cores,
+             ), \
+             patch("ptodsl._ops_simt._pto.syncall") as syncall_op:
+            _ops.syncall(
+                mode="soft",
+                core_type="aic_only",
+                gm_workspace=workspace,
+                used_cores=dynamic_used_cores,
+            )
+            _ops.syncall(
+                mode="soft",
+                core_type="mix",
+                gm_workspace=workspace,
+            )
+
+        self.assertEqual(
+            syncall_op.call_args_list,
+            [
+                call(
+                    "#pto.sync_all_mode<soft>",
+                    "#pto.sync_core_type<aic_only>",
+                    gm_workspace=raw_workspace,
+                    used_cores=coerced_dynamic_used_cores,
+                ),
+                call(
+                    "#pto.sync_all_mode<soft>",
+                    "#pto.sync_core_type<mix>",
+                    gm_workspace=raw_workspace,
+                ),
+            ],
+        )
 
     def test_direct_vector_wrappers_dispatch_to_generated_ops(self):
         lhs = SimpleNamespace(type="vec_ty")
@@ -1611,7 +1733,7 @@ class VectorCubeSurfaceTest(unittest.TestCase):
                 _ops.wait_cross_block,
                 (pto.Pipe.M, 0),
                 "wait_cross_block(pipe, event_id)",
-                "<PIPE_FIX>, <PIPE_MTE1>, <PIPE_MTE2>, <PIPE_MTE3>, <PIPE_V>",
+                "<PIPE_FIX>, <PIPE_MTE1>, <PIPE_MTE2>, <PIPE_MTE3>, <PIPE_S>, <PIPE_V>",
                 "<PIPE_M>",
             ),
             (

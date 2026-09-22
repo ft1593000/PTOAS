@@ -18,9 +18,11 @@ from ._ops_common import (
     _event_attr,
     _l1_cache_attr,
     _ld_l2_cache_attr,
+    _normalize_token,
     _optional_signedness_attr,
     _pipe_attr,
     _pointer_element_type,
+    _require_target_arch,
     _required_signedness_attr,
     _same_type_binary,
     _same_type_ternary,
@@ -654,15 +656,66 @@ def set_cross_block(pipe, event_id):
 
 def wait_cross_block(pipe, event_id):
     """``pto.wait_cross_block(pipe, event_id)`` – emits ``pto.wait_cross_block``."""
-    _validate_sync_pipe(
+    pipe_token = _validate_sync_pipe(
         pipe,
         context="wait_cross_block(pipe, event_id)",
-        allowed=("PIPE_FIX", "PIPE_MTE1", "PIPE_MTE2", "PIPE_MTE3", "PIPE_V"),
+        allowed=("PIPE_FIX", "PIPE_MTE1", "PIPE_MTE2", "PIPE_MTE3", "PIPE_S", "PIPE_V"),
     )
+    if pipe_token == "PIPE_S":
+        _require_target_arch("wait_cross_block(Pipe.S, event_id)", {"a5"})
     event_operand = _sync_event_id_operand_in_range(
         event_id, context="wait_cross_block(..., event_id=...)", lo=0, hi=15
     )
     _pto.wait_cross_block(_pipe_attr(pipe), event_operand)
+
+
+def syncall(*, mode, core_type, gm_workspace=None, used_cores=None):
+    """Synchronize every participating core through ``pto.syncall``.
+
+    Hard synchronization takes no workspace and requires every participating
+    core to be simultaneously resident; otherwise the barrier can deadlock.
+    Soft synchronization requires a zero-initialized GM workspace matching the
+    ``pto.syncall`` IR contract.
+    """
+    mode_token = _normalize_token(mode, context="syncall(..., mode)")
+    if mode_token not in {"hard", "soft"}:
+        raise ValueError(
+            f"syncall(..., mode) does not support {mode!r}; expected hard or soft"
+        )
+
+    core_type_token = _normalize_token(
+        core_type, context="syncall(..., core_type)"
+    )
+    if core_type_token not in {"aiv_only", "aic_only", "mix"}:
+        raise ValueError(
+            "syncall(..., core_type) does not support "
+            f"{core_type!r}; expected aiv_only, aic_only, or mix"
+        )
+
+    if mode_token == "hard":
+        if gm_workspace is not None or used_cores is not None:
+            raise ValueError(
+                "syncall(mode='hard') does not accept gm_workspace or used_cores"
+            )
+        _pto.syncall(
+            Attribute.parse("#pto.sync_all_mode<hard>"),
+            Attribute.parse(f"#pto.sync_core_type<{core_type_token}>"),
+        )
+        return
+
+    if gm_workspace is None:
+        raise ValueError("syncall(mode='soft') requires gm_workspace")
+
+    kwargs = {"gm_workspace": unwrap_surface_value(gm_workspace)}
+    if used_cores is not None:
+        kwargs["used_cores"] = _coerce_i32_operand(
+            used_cores, context="syncall(..., used_cores)"
+        )
+    _pto.syncall(
+        Attribute.parse("#pto.sync_all_mode<soft>"),
+        Attribute.parse(f"#pto.sync_core_type<{core_type_token}>"),
+        **kwargs,
+    )
 
 
 def set_intra_block(pipe, event_id):

@@ -604,6 +604,7 @@ from ._ops_simt import (  # noqa: F401
     shuffle_up,
     simt_launch,
     sin,
+    syncall,
     sqrt,
     stg,
     store_vfsimt_info,
@@ -706,7 +707,7 @@ __all__ = [
     "fma",
     "syncthreads", "threadfence", "threadfence_block", "trap", "keep", "resume",
     "pipe_barrier", "get_buf", "rls_buf",
-    "set_cross_block", "wait_cross_block", "set_intra_block", "wait_intra_block",
+    "set_cross_block", "wait_cross_block", "set_intra_block", "wait_intra_block", "syncall",
     "set_flag", "wait_flag",
     "reserve_buffer", "import_reserved_buffer",
 ]

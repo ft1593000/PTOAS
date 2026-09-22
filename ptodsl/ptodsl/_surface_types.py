@@ -93,6 +93,21 @@ class Pipe:
     ALL = _pto.PIPE.PIPE_ALL
 
 
+class SyncAllMode(str, Enum):
+    """Cross-core all-participant synchronization implementation mode."""
+
+    HARD = "hard"
+    SOFT = "soft"
+
+
+class SyncCoreType(str, Enum):
+    """Core participation kind for :func:`pto.syncall`."""
+
+    AIV_ONLY = "aiv_only"
+    AIC_ONLY = "aic_only"
+    MIX = "mix"
+
+
 class MaskPattern:
     """Public PTODSL mask-pattern tokens."""
 

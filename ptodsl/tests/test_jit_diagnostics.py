@@ -712,6 +712,11 @@ def taddrelu_a5_probe():
     pto.tile.addrelu(lhs, rhs, dst)
 
 
+@pto.jit(target="a3")
+def pipe_s_cross_wait_a3_probe():
+    pto.wait_cross_block(pto.Pipe.S, 14)
+
+
 def define_ast_rewrite_traceback_line_probe():
     @pto.jit(  # AST_REWRITE_FIRST_LINE_MARKER
         target="a5",
@@ -1357,6 +1362,13 @@ def main() -> None:
         "target='a2'",
         "target='a3'",
         "target='a5'",
+    )
+    expect_raises(
+        pipe_s_cross_wait_a3_probe.compile,
+        ValueError,
+        "wait_cross_block(Pipe.S, event_id)",
+        "target='a5'",
+        "target='a3'",
     )
     expect_raises(
         define_tprint_vpto_rejected_probe().compile,

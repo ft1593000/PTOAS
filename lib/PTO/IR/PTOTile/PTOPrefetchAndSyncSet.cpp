@@ -124,7 +124,8 @@ void mlir::pto::SyncSetOp::print(OpAsmPrinter &p) {
 
 static LogicalResult verifySyncSetWaitCommon(
     Operation *op, PipeAttr pipe, IntegerAttr eventIdAttr, Value eventIdDyn,
-    IntegerAttr fftsModeAttr, StringRef opName) {
+    IntegerAttr fftsModeAttr, StringRef opName,
+    bool allowScalarMode0Wait = false) {
   if ((eventIdAttr != nullptr) == static_cast<bool>(eventIdDyn))
     return op->emitOpError(
         "expects exactly one event-id form: static attr or dynamic index operand");
@@ -135,7 +136,8 @@ static LogicalResult verifySyncSetWaitCommon(
            << "requires ffts_mode in range [0, 2], but got "
            << fftsModeAttr.getInt();
   auto verifyA2A3 = []() -> LogicalResult { return success(); };
-  auto verifyA5 = [op, pipe, eventIdAttr, opName]() -> LogicalResult {
+  auto verifyA5 = [op, pipe, eventIdAttr, fftsModeAttr, opName,
+                   allowScalarMode0Wait]() -> LogicalResult {
     if (eventIdAttr &&
         (eventIdAttr.getInt() < 0 || eventIdAttr.getInt() > 15))
       return op->emitOpError()
@@ -149,6 +151,15 @@ static LogicalResult verifySyncSetWaitCommon(
     case PIPE::PIPE_MTE3:
     case PIPE::PIPE_V:
       return success();
+    case PIPE::PIPE_S:
+      if (allowScalarMode0Wait && fftsModeAttr &&
+          fftsModeAttr.getInt() == 0)
+        return success();
+      if (allowScalarMode0Wait)
+        return op->emitOpError()
+               << "A5 " << opName
+               << " supports <PIPE_S> only with ffts_mode = 0";
+      [[fallthrough]];
     default:
       return op->emitOpError()
              << "A5 " << opName << " expects pipe to be one of "

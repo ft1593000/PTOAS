@@ -4389,14 +4389,59 @@ def public_sync_surface_probe():
     pto.wait_flag(pto.Pipe.V, pto.Pipe.MTE3, event_id=dynamic_event)
     pto.set_cross_block(pto.Pipe.FIX, 0)
     pto.set_cross_block(pto.Pipe.FIX, dynamic_event)
+    pto.set_cross_block(pto.Pipe.MTE3, 14)
     pto.set_intra_block(pto.Pipe.MTE3, dynamic_event)
     pto.set_intra_block(pto.Pipe.FIX, 4)
     pto.wait_cross_block(pto.Pipe.FIX, 0)
     pto.wait_cross_block(pto.Pipe.FIX, dynamic_event)
+    pto.wait_cross_block(pto.Pipe.S, 14)
     pto.wait_intra_block(pto.Pipe.V, dynamic_event)
     pto.wait_intra_block(pto.Pipe.FIX, 20)
     pto.wait_intra_block(pto.Pipe.MTE3, dynamic_event)
     pto.wait_intra_block(pto.Pipe.MTE3, 31)
+
+
+@pto.jit(target="a5")
+def public_syncall_aiv_hard_probe():
+    pto.syncall(
+        mode=pto.SyncAllMode.HARD,
+        core_type=pto.SyncCoreType.AIV_ONLY,
+    )
+
+
+@pto.jit(target="a5")
+def public_syncall_other_hard_probe():
+    pto.syncall(
+        mode=pto.SyncAllMode.HARD,
+        core_type=pto.SyncCoreType.AIC_ONLY,
+    )
+    pto.syncall(
+        mode=pto.SyncAllMode.HARD,
+        core_type=pto.SyncCoreType.MIX,
+    )
+
+
+@pto.jit(target="a5")
+def public_syncall_soft_probe(
+    gm_workspace: pto.ptr(pto.i32, "gm"), dynamic_used_cores: pto.i32
+):
+    pto.syncall(
+        mode=pto.SyncAllMode.SOFT,
+        core_type=pto.SyncCoreType.AIV_ONLY,
+        gm_workspace=gm_workspace,
+        used_cores=4,
+    )
+    pto.syncall(
+        mode=pto.SyncAllMode.SOFT,
+        core_type=pto.SyncCoreType.AIC_ONLY,
+        gm_workspace=gm_workspace,
+        used_cores=dynamic_used_cores,
+    )
+    pto.syncall(
+        mode=pto.SyncAllMode.SOFT,
+        core_type=pto.SyncCoreType.MIX,
+        gm_workspace=gm_workspace,
+    )
 
 
 @pto.jit(target="a5")
@@ -5356,6 +5401,9 @@ def main() -> None:
     public_mask_bitcast_probe.verify()
     public_mask_surface_probe.verify()
     public_sync_surface_probe.verify()
+    public_syncall_aiv_hard_probe.verify()
+    public_syncall_other_hard_probe.verify()
+    public_syncall_soft_probe.verify()
     public_trap_surface_probe.verify()
     explicit_runtime_index_bitwise_event_probe.verify()
     explicit_runtime_index_integer_bitwise_event_probe.verify()
@@ -8363,6 +8411,18 @@ def main() -> None:
     expect_parse_roundtrip_and_verify(mask_surface_text, "public mask surface specialization")
     sync_surface_text = public_sync_surface_probe.compile().mlir_text()
     expect_parse_roundtrip_and_verify(sync_surface_text, "public sync surface specialization")
+    syncall_aiv_hard_text = public_syncall_aiv_hard_probe.compile().mlir_text()
+    expect_parse_roundtrip_and_verify(
+        syncall_aiv_hard_text, "public AIV-only hard syncall specialization"
+    )
+    syncall_other_hard_text = public_syncall_other_hard_probe.compile().mlir_text()
+    expect_parse_roundtrip_and_verify(
+        syncall_other_hard_text, "public AIC-only and mixed hard syncall specialization"
+    )
+    syncall_soft_text = public_syncall_soft_probe.compile().mlir_text()
+    expect_parse_roundtrip_and_verify(
+        syncall_soft_text, "public soft syncall specialization"
+    )
     trap_surface_text = public_trap_surface_probe.compile().mlir_text()
     expect_parse_roundtrip_and_verify(trap_surface_text, "public trap surface specialization")
     dynamic_buf_sync_text = public_dynamic_buf_sync_surface_probe.compile().mlir_text()
@@ -8886,12 +8946,39 @@ def main() -> None:
         "AST rewritten range loop index bitwise event id should lower to pto.wait_flag_dyn",
     )
     expect(
+        "pto.syncall() mode = #pto.sync_all_mode<hard>, "
+        "core_type = #pto.sync_core_type<aiv_only>" in syncall_aiv_hard_text,
+        "AIV-only hard syncall should lower directly to pto.syncall",
+    )
+    expect(
+        "core_type = #pto.sync_core_type<aic_only>" in syncall_other_hard_text
+        and "core_type = #pto.sync_core_type<mix>" in syncall_other_hard_text,
+        "hard syncall should compile for AIC-only and mixed participants",
+    )
+    expect(
+        syncall_soft_text.count("mode = #pto.sync_all_mode<soft>") == 3
+        and "core_type = #pto.sync_core_type<aiv_only>" in syncall_soft_text
+        and "core_type = #pto.sync_core_type<aic_only>" in syncall_soft_text
+        and "core_type = #pto.sync_core_type<mix>" in syncall_soft_text,
+        "soft syncall should compile all participant kinds",
+    )
+    expect(
+        "pto.constant 4 : i32" in syncall_soft_text
+        and syncall_soft_text.count("!pto.ptr<i32, gm>") >= 3,
+        "soft syncall should wire static/dynamic used_cores and GM workspace operands",
+    )
+    expect(
         "pto.set_cross_block <PIPE_FIX>, 0" in sync_surface_text,
         "set_cross_flag(Pipe.FIX, 0) should lower to pto.set_cross_block",
     )
     expect(
         "pto.wait_cross_block <PIPE_FIX>, 0" in sync_surface_text,
         "wait_cross_flag(Pipe.FIX, 0) should lower to pto.wait_cross_block",
+    )
+    expect(
+        "pto.set_cross_block <PIPE_MTE3>, 14" in sync_surface_text
+        and "pto.wait_cross_block <PIPE_S>, 14" in sync_surface_text,
+        "A5 mode-0 cross-block sync should allow MTE3 arrival with a scalar wait",
     )
     expect(
         re.search(r"pto\.set_cross_block <PIPE_FIX>, %[a-zA-Z0-9_]+ : i32", sync_surface_text)

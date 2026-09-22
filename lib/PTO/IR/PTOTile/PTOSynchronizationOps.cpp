@@ -32,14 +32,16 @@ void mlir::pto::SyncAllOp::print(OpAsmPrinter &p) {
 LogicalResult mlir::pto::SyncWaitOp::verify() {
   return verifySyncSetWaitCommon(getOperation(), getPipe(), getEventIdAttr(),
                                  getEventIdDyn(), getFftsModeAttr(),
-                                 "sync.wait");
+                                 "sync.wait",
+                                 /*allowScalarMode0Wait=*/true);
 }
 
 static LogicalResult verifyNamedSyncEventOp(Operation *op, PipeAttr pipe,
                                             IntegerAttr eventIdAttr,
                                             Value eventIdDyn,
                                             int64_t maxEventId,
-                                            StringRef opName) {
+                                            StringRef opName,
+                                            bool allowScalarPipe = false) {
   const bool hasStaticEventId = eventIdAttr != nullptr;
   const bool hasDynamicEventId = static_cast<bool>(eventIdDyn);
   if (hasStaticEventId == hasDynamicEventId) {
@@ -70,10 +72,15 @@ static LogicalResult verifyNamedSyncEventOp(Operation *op, PipeAttr pipe,
   case PIPE::PIPE_MTE3:
   case PIPE::PIPE_V:
     return success();
+  case PIPE::PIPE_S:
+    if (allowScalarPipe)
+      return success();
+    [[fallthrough]];
   default:
     return op->emitOpError() << opName << " expects pipe to be one of "
                               << "<PIPE_FIX>, <PIPE_MTE1>, <PIPE_MTE2>, "
-                              << "<PIPE_MTE3>, <PIPE_V>";
+                              << "<PIPE_MTE3>, <PIPE_V>"
+                              << (allowScalarPipe ? ", <PIPE_S>" : "");
   }
 }
 
@@ -116,8 +123,18 @@ void mlir::pto::WaitCrossBlockOp::print(OpAsmPrinter &p) {
 }
 
 LogicalResult mlir::pto::WaitCrossBlockOp::verify() {
-    return verifyNamedSyncEventOp(
-        getOperation(), getPipe(), getEventIdAttr(), getEventIdDyn(), mlir::pto::kValue15, "pto.wait_cross_block");
+    auto verifyA2A3 = [this]() -> LogicalResult {
+        return verifyNamedSyncEventOp(
+            getOperation(), getPipe(), getEventIdAttr(), getEventIdDyn(),
+            mlir::pto::kValue15, "pto.wait_cross_block");
+    };
+    auto verifyA5 = [this]() -> LogicalResult {
+        return verifyNamedSyncEventOp(
+            getOperation(), getPipe(), getEventIdAttr(), getEventIdDyn(),
+            mlir::pto::kValue15, "pto.wait_cross_block",
+            /*allowScalarPipe=*/true);
+    };
+    return dispatchVerifierByArch(getOperation(), verifyA2A3, verifyA5);
 }
 
 ParseResult mlir::pto::SetIntraBlockOp::parse(OpAsmParser &parser,
