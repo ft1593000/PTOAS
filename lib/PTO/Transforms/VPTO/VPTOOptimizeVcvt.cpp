@@ -10,6 +10,7 @@
 #include "PTO/IR/PTO.h"
 #include "PTO/IR/PTOTypeUtils.h"
 #include "PTO/Transforms/Passes.h"
+#include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/PatternMatch.h"
 #include "mlir/Pass/Pass.h"
@@ -30,6 +31,7 @@ namespace {
 constexpr unsigned kB16StorageBits = 16;
 constexpr unsigned kB32StorageBits = 32;
 constexpr unsigned kFourLanePackingFactor = 4;
+constexpr int64_t kU16LaneMask = 0xFFFF;
 
 static bool isOddPart(StringRef part) {
   return part == "ODD" || part == "PART_ODD";
@@ -46,6 +48,25 @@ static bool isAllTrueMask(Value mask) {
     return op.getPattern() == "PAT_ALL";
   }
   return false;
+}
+
+static std::optional<int64_t> getConstantInt(Value value) {
+  while (auto cast = value.getDefiningOp<UnrealizedConversionCastOp>()) {
+    size_t numInputs = cast.getInputs().size();
+    if (numInputs != 1) {
+      return std::nullopt;
+    }
+    value = cast.getInputs().front();
+  }
+  if (auto constant = value.getDefiningOp<arith::ConstantIntOp>()) {
+    return constant.value();
+  }
+  if (auto constant = value.getDefiningOp<arith::ConstantOp>()) {
+    if (auto integer = dyn_cast<IntegerAttr>(constant.getValue())) {
+      return integer.getInt();
+    }
+  }
+  return std::nullopt;
 }
 
 static bool isPairEquivalentLoadDist(StringRef dist) {
@@ -271,12 +292,129 @@ struct FoldZeroGapExtensionPattern : public OpRewritePattern<VcvtOp> {
   }
 };
 
+// Fold u32 -> u16 narrowing when the source has already selected one half of
+// every u32 lane:
+//
+//   high = vshrs(x, 16)
+//   low  = vand(x, 0xffff)
+//
+// Truncating either result to u16 is exactly the corresponding high/low
+// sublane stream of x.  The 2x integer-narrowing lowering uses the even-part
+// form, so both source kinds are matched with part = "EVEN"; the source op,
+// not the part, decides whether vdintlv's high or low result is selected.
+// Reinterpret x once as u16 and use vdintlv(x16, x16) to expose both streams
+// without materializing the vshr/vand source and without requiring a
+// pre-existing vbitcast in the input pattern.
+struct FoldU32ToU16ExtractionPattern : public OpRewritePattern<VcvtOp> {
+  using OpRewritePattern::OpRewritePattern;
+
+  static bool isConstantVector(Value value, int64_t expected) {
+    if (auto duplicate = value.getDefiningOp<VdupOp>()) {
+      if (!isAllTrueMask(duplicate.getMask())) {
+        return false;
+      }
+      std::optional<int64_t> constant = getConstantInt(duplicate.getInput());
+      return constant && *constant == expected;
+    }
+    if (auto broadcast = value.getDefiningOp<VbrOp>()) {
+      std::optional<int64_t> constant = getConstantInt(broadcast.getValue());
+      return constant && *constant == expected;
+    }
+    return false;
+  }
+
+  static std::optional<Value> getLowHalfSource(Value value) {
+    auto andOp = value.getDefiningOp<VandOp>();
+    if (!andOp || !isAllTrueMask(andOp.getMask())) {
+      return std::nullopt;
+    }
+    if (isConstantVector(andOp.getRhs(), kU16LaneMask)) {
+      return andOp.getLhs();
+    }
+    if (isConstantVector(andOp.getLhs(), kU16LaneMask)) {
+      return andOp.getRhs();
+    }
+    return std::nullopt;
+  }
+
+  static std::optional<Value> getHighHalfSource(Value value) {
+    auto shift = value.getDefiningOp<VshrsOp>();
+    if (!shift || !isAllTrueMask(shift.getMask())) {
+      return std::nullopt;
+    }
+    std::optional<int64_t> amount = getConstantInt(shift.getScalar());
+    if (!amount || *amount != static_cast<int64_t>(kB16StorageBits)) {
+      return std::nullopt;
+    }
+    return shift.getInput();
+  }
+
+  LogicalResult matchAndRewrite(VcvtOp op,
+                                PatternRewriter &rewriter) const override {
+    auto inputType = dyn_cast<VRegType>(op.getInput().getType());
+    auto resultType = dyn_cast<VRegType>(op.getResult().getType());
+    if (!inputType || !resultType || !isAllTrueMask(op.getMask())) {
+      return failure();
+    }
+
+    auto inputIntType = dyn_cast<IntegerType>(inputType.getElementType());
+    auto resultIntType = dyn_cast<IntegerType>(resultType.getElementType());
+    if (!inputIntType || !resultIntType) {
+      return failure();
+    }
+    bool unsignedTypes =
+        inputIntType.isUnsigned() && resultIntType.isUnsigned();
+    unsigned inputBits = inputIntType.getWidth();
+    unsigned resultBits = resultIntType.getWidth();
+    if (!unsignedTypes || inputBits != kB32StorageBits ||
+        resultBits != kB16StorageBits) {
+      return failure();
+    }
+    int64_t inputTotalBits = inputType.getElementCount() * inputBits;
+    int64_t resultTotalBits = resultType.getElementCount() * resultBits;
+    if (inputTotalBits != resultTotalBits) {
+      return failure();
+    }
+    StringAttr sat = op.getSatAttr();
+    bool noSaturation = sat && sat.getValue() == "NOSAT";
+    if (!noSaturation) {
+      return failure();
+    }
+
+    std::optional<StringRef> part = op.getPart();
+    if (!part || *part != "EVEN") {
+      return failure();
+    }
+
+    std::optional<Value> highSource = getHighHalfSource(op.getInput());
+    std::optional<Value> lowSource = getLowHalfSource(op.getInput());
+    if (highSource && lowSource) {
+      return failure();
+    }
+
+    bool useHigh = static_cast<bool>(highSource);
+    std::optional<Value> source = useHigh ? highSource : lowSource;
+    if (!source) {
+      return failure();
+    }
+
+    Value packed = rewriter
+                       .create<VbitcastOp>(op.getLoc(), resultType, *source)
+                       .getResult();
+    auto extracted = rewriter.create<VdintlvOp>(
+        op.getLoc(), resultType, resultType, packed, packed);
+    rewriter.replaceOp(op, useHigh ? extracted.getHigh() : extracted.getLow());
+    return success();
+  }
+};
+
 struct VPTOOptimizeVcvtPass
     : public pto::impl::VPTOOptimizeVcvtBase<VPTOOptimizeVcvtPass> {
   void runOnOperation() override {
     RewritePatternSet patterns(&getContext());
     patterns.add<CanonicalizeEquivalentPartPattern,
-                 FoldZeroGapExtensionPattern>(&getContext());
+                 FoldZeroGapExtensionPattern,
+                 FoldU32ToU16ExtractionPattern>(&getContext());
     if (failed(applyPatternsAndFoldGreedily(getOperation(), std::move(patterns)))) {
       signalPassFailure();
     }
