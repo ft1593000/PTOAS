@@ -115,7 +115,7 @@ private:
     return success();
   }
 
-  LogicalResult lowerPackedE2M1LaneStride2(
+  LogicalResult lowerPackedLaneStride2(
       VMIExtFOp op, ValueRange sourceParts, const ExtFPhysicalPlan &plan,
       OneToNPatternRewriter &rewriter) const {
     static constexpr StringRef kPacked2Parts[] = {"P0", "P2"};
@@ -282,17 +282,21 @@ private:
                              viewPlan.vcvtResultType);
     }
 
-    // Packed f4E2M1x2 sources stored with lane_stride = 2 (UNPK_B8) have
-    // valid bytes on the even lanes; P0 (lanes 0 mod 4) plus P2 (lanes 2 mod
-    // 4) cover them while P1/P3 are zero-fill gaps, so widen through the
-    // {P0, P2} part pair instead of the dense factor-4 selection.
-    bool packedE2M1LaneStride2 =
+    // 8-bit sources stored with lane_stride = 2 (UNPK_B8) keep valid bytes on
+    // the even lanes. P0 (lanes 0 mod 4) plus P2 (lanes 2 mod 4) cover them,
+    // while P1/P3 are zero-fill gaps; this applies both to packed f4E2M1x2
+    // and to dense FP8/HiF8. Widen through the {P0, P2} part pair instead of
+    // the dense factor-4 selection.
+    Type sourceElementType = plan.sourceType.getElementType();
+    bool packedLaneStride2 =
         sourceLayout && sourceLayout.isContiguous() &&
         sourceLayout.getLaneStride() == 2 &&
-        isa<pto::F4E2M1x2Type>(plan.sourceType.getElementType()) &&
+        (isa<pto::F4E2M1x2Type>(sourceElementType) ||
+         pto::isPTOFloat8Type(sourceElementType) ||
+         pto::isPTOHiFloat8Type(sourceElementType)) &&
         plan.resultTypes.size() == 2 * sourceParts.size();
-    if (packedE2M1LaneStride2) {
-      return lowerPackedE2M1LaneStride2(op, sourceParts, plan, rewriter);
+    if (packedLaneStride2) {
+      return lowerPackedLaneStride2(op, sourceParts, plan, rewriter);
     }
 
     FailureOr<bool> spineCompositeWidening = tryLowerSpineCompositeWidening(

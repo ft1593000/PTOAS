@@ -45,10 +45,10 @@ inline bool matchesGroupBroadcastLoadMemoryPattern(
   case GroupMemoryPatternKind::Any:
     return true;
   case GroupMemoryPatternKind::Contiguous:
-    if (!stride) {
-      return false;
-    }
-    return *stride == 1;
+    // An absent group-stride operand is materialized as 0 by the op builder.
+    // Only explicit constant 0/1 are adjacent-group cases; dynamic and negative
+    // strides remain conservatively unmatched.
+    return stride && (*stride == 0 || *stride == 1);
   case GroupMemoryPatternKind::BlockAligned: {
     if (!stride) {
       return false;

@@ -1777,13 +1777,15 @@ private:
       int64_t numGroups, OneToNPatternRewriter &rewriter) const {
     std::optional<int64_t> stride =
         getConstantIndexValue(op.getSourceGroupStride());
-    // The slots=8 plan reads every group through pto.vsldb, whose effective
-    // source address must be 32-byte aligned.  A unit group stride does not
-    // imply that: the offset is an arbitrary element offset.  Only take that
-    // plan when the address is provably aligned; otherwise use the slots=1
-    // plan, whose lane-zero BRC loads have no block alignment requirement.
+    // The op builder materializes an absent group stride as 0, so 0 and 1
+    // are both the adjacent-group case. The slots=8 plan reads every group
+    // through pto.vsldb, whose effective source address must be 32-byte
+    // aligned; a unit group stride does not imply that. Only take that plan
+    // when the address is provably aligned; otherwise use the slots=1 plan,
+    // whose lane-zero BRC loads have no block alignment requirement.
+    bool unitStride = stride && (*stride == 0 || *stride == 1);
     bool alignedUnitStride =
-        stride && *stride == 1 &&
+        unitStride &&
         isKnownAddressAligned(op.getSource(), op.getOffset(),
                               resultVMIType.getElementType(),
                               kMemoryAccessAlignmentBytes);

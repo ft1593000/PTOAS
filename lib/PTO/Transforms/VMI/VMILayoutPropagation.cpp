@@ -1529,7 +1529,17 @@ FailureOr<Value> VMILayoutPropagator::materializeAt(Value source,
                                                     Location loc) const {
   VMILayoutAttr sourceLayout = getCurrentLayout(source);
   if (!sourceLayout) {
-    return failure();
+    // Use-conflict relayout of a value that the propagation never assigned a
+    // layout to.  No EnsureLayout op can be built for it (the transfer relates
+    // two existing layouts), but a block argument -- or anything defined
+    // inside this scope -- can take the requested layout in place, which is
+    // exactly what materializePrimary does for rewriteable values.
+    Type rewriteType = getTypeWithLayout(source, layout);
+    if (!rewriteType || !isTypeRewriteable(source)) {
+      return failure();
+    }
+    source.setType(rewriteType);
+    return source;
   }
   if (sourceLayout == layout) {
     return source;

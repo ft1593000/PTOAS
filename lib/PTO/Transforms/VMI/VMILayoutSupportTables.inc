@@ -568,11 +568,20 @@ static constexpr GroupBroadcastLoadLayoutPattern
         {gb(1), bits<8, 16, 32>(), memAny(), c()},
         {gb(2), bits<8, 16, 32>(), memAny(), c()},
         {gb(4), bits<8, 16, 32>(), memAny(), c()},
+        // Same single-element-broadcast argument as the gbFull rows below: a
+        // contiguous lane_stride = 2 carrier needs no data rearrangement.
+        {gb(4), bits<8, 16, 32>(), memContiguous(), ls(2), G<1>()},
         {gbFull(), bits<8, 16, 32>(), memAny(), c()},
         // A single-group BRC is a scalar broadcast. Its equal-valued result
         // may use a deinterleaved physical layout without data rearrangement.
         {gbFull(), bits<8, 16, 32>(), memAny(), d(2), G<1>()},
         {gbFull(), bits<8, 16, 32>(), memAny(), d(4), G<1>()},
+        // Same argument for the lane-strided physical carriers: every lane of a
+        // single-group broadcast holds the same element, so a contiguous
+        // lane_stride = 2 result needs no rearrangement either.  Without this
+        // row a plain `vload(..., dist_mode="brc")` (no group/stride) on an
+        // 8-bit buffer has no matching row at all.
+        {gbFull(), bits<8, 16, 32>(), memAny(), ls(2), G<1>()},
 };
 
 struct GroupBroadcastLoadDirectPattern {
@@ -606,6 +615,12 @@ static constexpr GroupBroadcastLoadDirectPattern
          bits<8, 16, 32>(), memAny(), d(2)},
         {VMIGroupBroadcastLoadDirectKind::BRC, G<1>(), gbFull(),
          bits<8, 16, 32>(), memAny(), d(4)},
+        // A 256-lane part on an 8-bit element type covers 32 VCG block
+        // elements, so a 128-lane single-group broadcast is a gb(4) group (half
+        // a part), not gbFull.  It is still a scalar broadcast whose
+        // equal-valued result may be carried contiguously with lane_stride = 2.
+        {VMIGroupBroadcastLoadDirectKind::BRC, G<1>(), gb(4),
+         bits<8, 16, 32>(), memAny(), ls(2)},
 };
 
 struct VselrLayoutPattern {
