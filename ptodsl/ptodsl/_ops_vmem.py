@@ -317,6 +317,7 @@ _VCVT_CONTRACTS = {
     ("f16", "f8e4m3"): _vcvt_contract(True, True, True, allowed_rnd="RAFZC"),
     ("f16", "f8e5m2"): _vcvt_contract(True, True, True, allowed_rnd="RAFZC"),
     ("f16", "hif8"): _vcvt_contract(True, True, True, allowed_rnd="AH"),
+    ("f16", "bf16"): _vcvt_contract(True, False, False, allowed_rnd="RAFZC"),
     ("f16", "f32"): _vcvt_contract(False, False, True),
     ("f16", "s32"): _vcvt_contract(True, False, True),
     ("f16", "s16"): _vcvt_contract(True, True, False),

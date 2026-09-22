@@ -4631,9 +4631,11 @@ def public_vector_conversion_surface_probe():
     ub_i32 = pto.castptr(zero_u64, pto.ptr(pto.i32, "ub"))
     ub_f16 = pto.castptr(zero_u64, pto.ptr(pto.f16, "ub"))
 
+    mask16_full = pto.pset_b16(pto.MaskPattern.ALL)
     mask32_full = pto.pset_b32(pto.MaskPattern.ALL)
     vec_f32, ub_f32_next = pto.vlds(ub_f32, pto.const(0), post_update=pto.PostUpdate.ON)
     vec_i32 = pto.vlds(ub_i32, pto.const(0))
+    vec_f16 = pto.vlds(ub_f16, pto.const(0))
     converted = pto.vcvt(
         vec_f32,
         pto.f16,
@@ -4641,6 +4643,12 @@ def public_vector_conversion_surface_probe():
         rnd=pto.VcvtRoundMode.R,
         sat=pto.VcvtSatMode.SAT,
         part=pto.VcvtPartMode.EVEN,
+    )
+    converted_bf16 = pto.vcvt(
+        vec_f16,
+        pto.bf16,
+        mask16_full,
+        rnd=pto.VcvtRoundMode.R,
     )
     ub_f16_next = pto.vsts(
         converted,
@@ -4654,6 +4662,7 @@ def public_vector_conversion_surface_probe():
 
     _ = ub_f32_next
     _ = ub_f16_next
+    _ = converted_bf16
     _ = packed
 
 
@@ -9016,6 +9025,10 @@ def main() -> None:
     expect("pto.vlds" in vector_conversion_surface_text, "vlds(..., post_update=ON) should lower through pto.vlds on the current VPTO Python surface")
     expect("-> !pto.vreg<64xf32>, !pto.ptr<f32, ub>" in vector_conversion_surface_text, "vlds(..., post_update=ON) should request the updated source pointer result")
     expect("pto.vcvt" in vector_conversion_surface_text, "vcvt(...) should lower to pto.vcvt")
+    expect(
+        "!pto.vreg<128xbf16>" in vector_conversion_surface_text,
+        "vcvt(f16 -> bf16) should infer the same-width bf16 result type",
+    )
     expect('rnd = "R"' in vector_conversion_surface_text, "vcvt(..., rnd=VcvtRoundMode.R) should preserve the authored rounding attr")
     expect('sat = "SAT"' in vector_conversion_surface_text, "vcvt(..., sat=VcvtSatMode.SAT) should preserve the authored saturation attr")
     expect('part = "EVEN"' in vector_conversion_surface_text, "vcvt(..., part=VcvtPartMode.EVEN) should preserve the authored part attr")

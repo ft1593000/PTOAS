@@ -2211,6 +2211,7 @@ These ops change the element type or layout of vector registers. They are distin
 - `f32 -> hif8` requires `rnd=A/H`, `sat`, and `part=P0/P1/P2/P3`.
 - `f16/bf16 -> f8e4m3/f8e5m2` requires `rnd=R/A/F/Z/C`, `sat`, and `part=EVEN/ODD`.
 - `f16 -> hif8` requires `rnd=A/H`, `sat`, and `part=EVEN/ODD`.
+- `f16 -> bf16` requires `rnd=R/A/F/Z/C`; it does not take `sat` or `part`.
 - `bf16 -> f4e1m2x2/f4e2m1x2` requires `rnd=R/A/F/Z/C` and `part=P0/P1/P2/P3`; it does not take `sat`.
 - `f8e4m3/f8e5m2/hif8 -> f32` and `f4e1m2x2/f4e2m1x2 -> bf16` require `part=P0/P1/P2/P3`; they do not take `rnd` or `sat`.
 
