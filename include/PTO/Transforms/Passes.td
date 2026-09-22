@@ -661,6 +661,13 @@ def PTOArithRangeOptimize : Pass<"pto-arith-range-optimize", ""> {
     the LLVM backend folds into shifts/masks.
 
     Ops whose range cannot be proven are left unchanged.
+    To avoid an LLVM 19 integer-range miscompilation observed in the A5
+    pipeline for mixed integer/floating scf.if results, integer-range rewrites
+    are suppressed only on the affected data/control-flow slice. Unrelated
+    arithmetic in the same A5 function still receives integer-range
+    optimization; other architectures keep the original module-level pipeline.
+    The unsigned-equivalence, canonicalization, and offset-narrowing steps
+    always run.
   }];
   let constructor = "mlir::pto::createPTOArithRangeOptimizePass()";
   let dependentDialects = [

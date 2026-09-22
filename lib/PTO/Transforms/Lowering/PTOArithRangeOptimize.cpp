@@ -49,10 +49,14 @@
 #include "PTO/IR/PTO.h"
 #include "PTO/Transforms/Passes.h"
 
+#include "mlir/Analysis/DataFlow/DeadCodeAnalysis.h"
+#include "mlir/Analysis/DataFlow/IntegerRangeAnalysis.h"
+#include "mlir/Analysis/DataFlowFramework.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Arith/Transforms/Passes.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
+#include "mlir/Dialect/Utils/StaticValueUtils.h"
 #include "mlir/IR/PatternMatch.h"
 #include "mlir/Interfaces/InferIntRangeInterface.h"
 #include "mlir/Pass/Pass.h"
@@ -61,6 +65,7 @@
 
 #include "llvm/ADT/APInt.h"
 #include "llvm/ADT/DenseMap.h"
+#include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/SmallVector.h"
 
 #include <algorithm>
@@ -115,6 +120,244 @@ struct URange {
 static bool fitsU32(const URange &r) {
   return r.valid && r.lo.isNonNegative() && r.hi.isNonNegative() &&
          r.hi.getActiveBits() <= kI32RangeBitWidth;
+}
+
+static bool hasMixedIntegerFloatResults(scf::IfOp ifOp) {
+  bool hasInt = false;
+  bool hasFloat = false;
+  for (Type type : ifOp.getResultTypes()) {
+    hasInt |= isa<IntegerType, IndexType>(type);
+    hasFloat |= isa<FloatType>(type);
+  }
+  return hasInt && hasFloat;
+}
+
+// LLVM 19's IntegerRangeAnalysis can propagate a branch initializer through a
+// mixed integer/floating scf.if and incorrectly classify a runtime load as a
+// constant. Conservatively taint only the data/control-flow slice rooted at
+// such an if. Values outside that slice remain eligible for every upstream
+// integer-range rewrite.
+static bool
+isNestedInTaintedControl(Operation *op,
+                         const DenseSet<Operation *> &taintedControlOps) {
+  for (Operation *parent = op->getParentOp(); parent;
+       parent = parent->getParentOp()) {
+    if (taintedControlOps.contains(parent)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+static bool insertOperationResults(Operation *op,
+                                   DenseSet<Value> &taintedValues) {
+  bool changed = false;
+  for (Value result : op->getResults()) {
+    changed |= taintedValues.insert(result).second;
+  }
+  return changed;
+}
+
+static bool insertRegionArguments(Operation *op,
+                                  DenseSet<Value> &taintedValues) {
+  bool changed = false;
+  for (Region &region : op->getRegions()) {
+    for (Block &block : region.getBlocks()) {
+      for (BlockArgument argument : block.getArguments()) {
+        changed |= taintedValues.insert(argument).second;
+      }
+    }
+  }
+  return changed;
+}
+
+static bool propagateYieldTaint(scf::YieldOp yieldOp,
+                                DenseSet<Value> &taintedValues) {
+  bool changed = false;
+  Operation *parentOp = yieldOp->getParentOp();
+  for (auto [index, operand] : llvm::enumerate(yieldOp.getOperands())) {
+    if (taintedValues.contains(operand) && index < parentOp->getNumResults()) {
+      changed |= taintedValues.insert(parentOp->getResult(index)).second;
+    }
+  }
+  return changed;
+}
+
+static bool taintOperation(Operation *op, DenseSet<Value> &taintedValues,
+                           DenseSet<Operation *> &taintedControlOps) {
+  bool tainted = taintedControlOps.contains(op) ||
+                 isNestedInTaintedControl(op, taintedControlOps) ||
+                 llvm::any_of(op->getOperands(), [&](Value operand) {
+                   return taintedValues.contains(operand);
+                 });
+  if (!tainted) {
+    return false;
+  }
+
+  bool changed = false;
+  if (auto ifOp = dyn_cast<scf::IfOp>(op)) {
+    changed |= taintedControlOps.insert(ifOp.getOperation()).second;
+  }
+  changed |= insertOperationResults(op, taintedValues);
+  changed |= insertRegionArguments(op, taintedValues);
+  if (auto yieldOp = dyn_cast<scf::YieldOp>(op)) {
+    changed |= propagateYieldTaint(yieldOp, taintedValues);
+  }
+  return changed;
+}
+
+static bool propagateTaint(func::FuncOp func, DenseSet<Value> &taintedValues,
+                           DenseSet<Operation *> &taintedControlOps) {
+  bool changed = false;
+  func.walk([&](Operation *op) {
+    changed |= taintOperation(op, taintedValues, taintedControlOps);
+  });
+  return changed;
+}
+
+static DenseSet<Value> collectMixedIfTaintedValues(func::FuncOp func) {
+  DenseSet<Value> taintedValues;
+  DenseSet<Operation *> taintedControlOps;
+
+  func.walk([&](scf::IfOp ifOp) {
+    if (!hasMixedIntegerFloatResults(ifOp)) {
+      return;
+    }
+    taintedControlOps.insert(ifOp.getOperation());
+    taintedValues.insert(ifOp.getResults().begin(), ifOp.getResults().end());
+  });
+
+  bool changed;
+  do {
+    changed = propagateTaint(func, taintedValues, taintedControlOps);
+  } while (changed);
+
+  return taintedValues;
+}
+
+static std::optional<APInt>
+getGuardedConstantValue(DataFlowSolver &solver, Value value,
+                        const DenseSet<Value> &taintedValues) {
+  if (taintedValues.contains(value)) {
+    return std::nullopt;
+  }
+  auto *lattice = solver.lookupState<dataflow::IntegerValueRangeLattice>(value);
+  if (!lattice || lattice->getValue().isUninitialized()) {
+    return std::nullopt;
+  }
+  return lattice->getValue().getValue().getConstantValue();
+}
+
+struct KnownIntegerConstant {
+  Value value;
+  APInt bits;
+};
+
+static void recordKnownConstant(Value value, DataFlowSolver &solver,
+                                const DenseSet<Value> &taintedValues,
+                                SmallVector<KnownIntegerConstant> &known) {
+  if (value.use_empty()) {
+    return;
+  }
+  std::optional<APInt> bits =
+      getGuardedConstantValue(solver, value, taintedValues);
+  if (bits) {
+    known.push_back({value, *bits});
+  }
+}
+
+static void
+recordRegionArgumentConstants(Operation *op, DataFlowSolver &solver,
+                              const DenseSet<Value> &taintedValues,
+                              SmallVector<KnownIntegerConstant> &known) {
+  for (Region &region : op->getRegions()) {
+    for (Block &block : region.getBlocks()) {
+      for (BlockArgument argument : block.getArguments()) {
+        recordKnownConstant(argument, solver, taintedValues, known);
+      }
+    }
+  }
+}
+
+static bool isIdentityRemainder(Operation *op, DataFlowSolver &solver,
+                                const DenseSet<Value> &taintedValues) {
+  if (!isa<arith::RemSIOp, arith::RemUIOp>(op)) {
+    return false;
+  }
+  Value dividend = op->getOperand(0);
+  if (taintedValues.contains(dividend)) {
+    return false;
+  }
+  std::optional<int64_t> divisor = getConstantIntValue(op->getOperand(1));
+  if (!divisor || *divisor <= 0) {
+    return false;
+  }
+  auto *state =
+      solver.lookupState<dataflow::IntegerValueRangeLattice>(dividend);
+  if (!state || state->getValue().isUninitialized()) {
+    return false;
+  }
+  const ConstantIntRanges &range = state->getValue().getValue();
+  const APInt &low = isa<arith::RemUIOp>(op) ? range.umin() : range.smin();
+  const APInt &high = isa<arith::RemUIOp>(op) ? range.umax() : range.smax();
+  return low.isNonNegative() && high.isNonNegative() && low.ule(high) &&
+         high.ult(*divisor);
+}
+
+static void collectGuardedRewrites(
+    func::FuncOp func, DataFlowSolver &solver,
+    const DenseSet<Value> &taintedValues,
+    SmallVector<KnownIntegerConstant> &known,
+    SmallVector<Operation *> &identityRemainders) {
+  func.walk([&](Operation *op) {
+    if (!op->hasTrait<OpTrait::ConstantLike>()) {
+      for (Value result : op->getResults()) {
+        recordKnownConstant(result, solver, taintedValues, known);
+      }
+      recordRegionArgumentConstants(op, solver, taintedValues, known);
+    }
+    if (isIdentityRemainder(op, solver, taintedValues)) {
+      identityRemainders.push_back(op);
+    }
+  });
+}
+
+static void applyGuardedRewrites(
+    func::FuncOp func, ArrayRef<KnownIntegerConstant> known,
+    ArrayRef<Operation *> identityRemainders) {
+  IRRewriter rewriter(func.getContext());
+  for (const KnownIntegerConstant &item : known) {
+    Value target = item.value;
+    if (Operation *definingOp = target.getDefiningOp()) {
+      rewriter.setInsertionPointAfter(definingOp);
+    } else {
+      rewriter.setInsertionPointToStart(target.getParentBlock());
+    }
+    IntegerAttr attr = rewriter.getIntegerAttr(target.getType(), item.bits);
+    Value replacement = rewriter.create<arith::ConstantOp>(
+        target.getLoc(), target.getType(), attr);
+    rewriter.replaceAllUsesWith(target, replacement);
+  }
+  for (Operation *remainder : identityRemainders) {
+    rewriter.replaceOp(remainder, remainder->getOperand(0));
+  }
+}
+
+static LogicalResult runGuardedIntRangeOptimizations(func::FuncOp func) {
+  DenseSet<Value> taintedValues = collectMixedIfTaintedValues(func);
+  DataFlowSolver solver;
+  solver.load<dataflow::DeadCodeAnalysis>();
+  solver.load<dataflow::IntegerRangeAnalysis>();
+  if (failed(solver.initializeAndRun(func))) {
+    return failure();
+  }
+
+  SmallVector<KnownIntegerConstant> known;
+  SmallVector<Operation *> identityRemainders;
+  collectGuardedRewrites(func, solver, taintedValues, known,
+                         identityRemainders);
+  applyGuardedRewrites(func, known, identityRemainders);
+  return success();
 }
 
 // Result of proving one chain value: `range.valid` means the value is
@@ -554,8 +797,46 @@ struct PTOArithRangeOptimizePass
       PTOArithRangeOptimizePass>::PTOArithRangeOptimizeBase;
 
   void runOnOperation() override {
+    // LLVM 19's integer-range solver can infer a false constant for an A5
+    // integer result of an scf.if that also carries floating-point results.
+    // In that case the materialization pattern can replace a runtime GM load
+    // with the branch's zero initializer (issue #1560). Until the upstream
+    // analysis is fixed, suppress integer-range rewrites only on the
+    // data/control flow slice rooted at a mixed-result if; unrelated arithmetic
+    // in the same function still receives the complete optimization set.
+    // TODO(#1560): Remove this guarded fork after the upstream LLVM range
+    // analysis handles mixed-result scf.if correctly.
+    // Keep the original module-level pipeline for A3: running the pass once
+    // per func.func changes its rewrite scope and can produce invalid UB
+    // addresses in otherwise unrelated A3 kernels.
     OpPassManager pm(ModuleOp::getOperationName());
-    pm.addPass(mlir::arith::createIntRangeOptimizationsPass());
+    bool hasA5Function = false;
+    getOperation()->walk([&](func::FuncOp func) {
+      hasA5Function |= pto::getTargetArch(func) == pto::PTOArch::A5;
+    });
+    if (!hasA5Function) {
+      pm.addPass(mlir::arith::createIntRangeOptimizationsPass());
+    } else {
+      WalkResult rangeResult = getOperation()->walk([&](func::FuncOp func) {
+        bool hasMixedIf = false;
+        func.walk([&](scf::IfOp ifOp) {
+          hasMixedIf |= hasMixedIntegerFloatResults(ifOp);
+        });
+        if (pto::getTargetArch(func) == pto::PTOArch::A5 && hasMixedIf) {
+          return failed(runGuardedIntRangeOptimizations(func))
+                     ? WalkResult::interrupt()
+                     : WalkResult::advance();
+        }
+        OpPassManager rangePM(func::FuncOp::getOperationName());
+        rangePM.addPass(mlir::arith::createIntRangeOptimizationsPass());
+        return failed(runPipeline(rangePM, func)) ? WalkResult::interrupt()
+                                                  : WalkResult::advance();
+      });
+      if (rangeResult.wasInterrupted()) {
+        signalPassFailure();
+        return;
+      }
+    }
     pm.addPass(mlir::arith::createArithUnsignedWhenEquivalentPass());
     pm.addPass(mlir::createCanonicalizerPass());
     if (failed(runPipeline(pm, getOperation()))) {
