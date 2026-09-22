@@ -110,6 +110,13 @@ the initialization operations participate in later semantic, layout,
 scheduling, and code-generation passes. V1 targets A5 + VPTO + `mode="explicit"`;
 calls under any other backend (e.g. EmitC) are rejected.
 
+For a mixed explicit kernel, call `pto.init_core()` once inside each physical
+section. PTODSL specializes the helper from the lexical section: the Cube
+section receives `set_mov_pad_val(0)`, while the Vector section receives the
+DMA loop-size initialization. An unscoped `pto.init_core()` combined with
+`pto.section(...)` is rejected, including when the call appears before the
+first section, because a mixed kernel has no single physical initialization.
+
 <!-- ptodsl-doc-test: {"mode":"compile","symbol":"init_core_example","compile":{}} -->
 ```python
 @pto.jit(target="a5", mode="explicit")

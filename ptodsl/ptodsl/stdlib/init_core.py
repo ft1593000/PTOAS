@@ -18,11 +18,12 @@ standard ``pto.*`` interfaces:
    ``pto.and``/``pto.or``) → ``pto.set_ctrl`` – preserve the running
    CTRL bits selected by ``_CTRL_KEEP_MASK`` and force the bits selected by
    ``_CTRL_PRESET_BITS``.
-2. Vector kernels: ``pto.set_loop_size_ubtoout(1, 1)`` /
+2. Vector kernels or explicit Vector sections:
+   ``pto.set_loop_size_ubtoout(1, 1)`` /
    ``pto.set_loop_size_outtoub(1, 1)`` to restore default DMA loop sizes.
-   Explicit ``kernel_kind="cube"`` kernels receive ``pto.set_mov_pad_val(0)``
-   instead, mirroring the reference ``__DAV_CUBE__`` / ``__DAV_VEC__``
-   initialization split.
+   Explicit ``kernel_kind="cube"`` kernels and Cube sections receive
+   ``pto.set_mov_pad_val(0)`` instead, mirroring the reference
+   ``__DAV_CUBE__`` / ``__DAV_VEC__`` initialization split.
 3. ``pto.set_store_atomic_cfg(0b00100100)`` – restore the default scalar
    store-atomic configuration.
 
@@ -51,6 +52,9 @@ def _authored_kernel_kind():
     session = current_session()
     if session is None:
         return None
+    section_kind = getattr(session, "current_physical_section_kind", None)
+    if section_kind in {"cube", "vector"}:
+        return section_kind
     module_spec = getattr(session, "current_function_module_spec", None)
     if module_spec is None:
         module_spec = session.module_spec
@@ -64,10 +68,22 @@ def init_core():
     _require_target_arch("pto.init_core()", {"a5"})
     _require_backend("pto.init_core()", {"vpto"})
 
+    kernel_kind = _authored_kernel_kind()
+    if kernel_kind is None:
+        # An unspecified kernel without physical sections keeps the historical
+        # implicit-Vector behavior. If this owner also authors a Cube/Vector
+        # section, the session rejects the ambiguous unscoped call regardless
+        # of whether it appears before or after the section in source order.
+        from .._tracing.active import current_session
+
+        session = current_session()
+        session.record_unscoped_init_core()
+        kernel_kind = "vector"
+
     ctrl = pto.get_ctrl()
     pto.set_ctrl((ctrl & _CTRL_KEEP_MASK) | _CTRL_PRESET_BITS)
 
-    if _authored_kernel_kind() == "cube":
+    if kernel_kind == "cube":
         pto.set_mov_pad_val(_PAD_VALUE)
     else:
         pto.set_loop_size_ubtoout(_DEFAULT_DMA_LOOP_COUNT, _DEFAULT_DMA_LOOP_COUNT)

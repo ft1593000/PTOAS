@@ -425,6 +425,16 @@ def subkernel_kernel_kind_mismatch_error(role: str, kernel_kind: str) -> Runtime
     )
 
 
+def init_core_physical_section_required_error() -> RuntimeError:
+    """Return a diagnostic for an unscoped init_core call in a mixed kernel."""
+    return RuntimeError(
+        "pto.init_core() cannot be called outside pto.section(...) when the "
+        "kernel uses explicit physical sections. Call pto.init_core() once "
+        "inside each physical section so PTODSL can select the matching Cube "
+        "or Vector initialization."
+    )
+
+
 def inline_subkernel_value_escape_error(role: str, type_text: str) -> RuntimeError:
     """Return one diagnostic for outlined inline-scope values escaping their helper boundary."""
     return RuntimeError(
@@ -615,6 +625,7 @@ __all__ = [
     "jit_missing_annotation_error",
     "jit_non_gm_ptr_entry_error",
     "inline_subkernel_value_escape_error",
+    "init_core_physical_section_required_error",
     "physical_section_value_escape_error",
     "make_tensor_view_missing_metadata_error",
     "illegal_inline_subkernel_placement_error",

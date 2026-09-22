@@ -32,6 +32,7 @@ from ptoas.mlir.ir import (
 )
 
 from .._diagnostics import (
+    init_core_physical_section_required_error,
     inline_subkernel_value_escape_error,
     inline_tileop_capture_type_error,
     physical_section_value_escape_error,
@@ -182,6 +183,8 @@ class TraceSession:
         self._carry_loop_stack = []
         self._active_physical_sections: set[object] = set()
         self._authored_physical_sections: dict[object, set[str]] = {}
+        self._physical_section_owner_symbols: set[str] = set()
+        self._unscoped_init_core_owner_symbols: set[str] = set()
         self._inline_subkernel_counter = 0
         self._escaped_inline_values: dict[object, tuple[str, str]] = {}
         self._physical_section_stack: list[tuple[str, object]] = []
@@ -206,6 +209,13 @@ class TraceSession:
         if current_record is not None:
             return current_record.module_spec
         return self.module_spec
+
+    @property
+    def current_physical_section_kind(self) -> str | None:
+        """Return the explicit physical section enclosing the current call site."""
+        if not self._physical_section_stack:
+            return None
+        return self._physical_section_stack[-1][0]
 
     @property
     def _function_symbol_table(self):
@@ -266,6 +276,13 @@ class TraceSession:
                 "section kind may appear at most once in a function"
             )
 
+    def record_unscoped_init_core(self) -> None:
+        """Record an implicit-Vector init and reject it for mixed kernels."""
+        owner_symbol = self.current_function_owner_symbol_name
+        if owner_symbol in self._physical_section_owner_symbols:
+            raise init_core_physical_section_required_error()
+        self._unscoped_init_core_owner_symbols.add(owner_symbol)
+
     @contextmanager
     def enter_physical_section(self, kind: str):
         """Create one explicit cube/vector section in the active function."""
@@ -280,6 +297,9 @@ class TraceSession:
             )
 
         function_key = self._physical_section_function_key()
+        owner_symbol = self.current_function_owner_symbol_name
+        if owner_symbol in self._unscoped_init_core_owner_symbols:
+            raise init_core_physical_section_required_error()
         if self.current_subkernel is not None:
             raise RuntimeError(
                 "pto.section() is not allowed inside a cube or simd subkernel body; "
@@ -308,6 +328,7 @@ class TraceSession:
                 finally:
                     self._physical_section_stack.pop()
                 self._record_physical_section_values(section_op, kind)
+            self._physical_section_owner_symbols.add(owner_symbol)
         except BaseException:
             if section_op.operation.parent is not None:
                 section_op.operation.erase()
@@ -783,6 +804,9 @@ class TraceSession:
         identity = func_template.__ptodsl_cache_signature__()
         if constexpr_bindings:
             identity = (identity, ("constexprs", tuple(constexpr_bindings)))
+        section_kind = self.current_physical_section_kind
+        if section_kind is not None:
+            identity = (identity, ("physical_section", section_kind))
         return HelperFunctionSpec(
             symbol_name=func_template.spec.symbol_name,
             arg_types=tuple(unwrap_surface_value(arg).type for arg in runtime_values),

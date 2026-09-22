@@ -11,8 +11,11 @@
 import operator
 import re
 import sys
+import tempfile
+from pathlib import Path
 from types import MappingProxyType
 
+from ptoas import _core
 from ptodsl import pto
 from ptodsl._func import FuncTemplate
 from ptodsl.stdlib import _exports
@@ -264,6 +267,125 @@ def repeated_calls_reuse_one_helper() -> None:
     expect(call_sites == 2, "repeated calls must emit one call site per invocation")
 
 
+def implicit_vector_kernel_keeps_top_level_init() -> None:
+    @pto.jit(target="a5", mode="explicit")
+    def implicit_vector_probe():
+        pto.init_core()
+
+    text = implicit_vector_probe.mlir_text()
+    expect("pto.set_loop_size_ubtoout" in text and
+           "pto.set_loop_size_outtoub" in text,
+           "an implicit Vector kernel must keep the historical Vector initialization")
+    expect("pto.set_mov_pad_val" not in text,
+           "an implicit Vector kernel must not emit Cube initialization")
+
+
+def mixed_kernel_specializes_init_by_physical_section() -> None:
+    @pto.jit(target="a5", mode="explicit", ast_rewrite=False)
+    def mixed_probe():
+        with pto.section("cube"):
+            pto.init_core()
+        with pto.section("vector"):
+            pto.init_core()
+
+    text = mixed_probe.mlir_text()
+    cube_call = re.search(r"pto\.section\.cube \{\s+func\.call @([^\(]+)", text)
+    vector_call = re.search(r"pto\.section\.vector \{\s+func\.call @([^\(]+)", text)
+    expect(cube_call is not None, "Cube section must call an init_core helper")
+    expect(vector_call is not None, "Vector section must call an init_core helper")
+    expect(cube_call.group(1) != vector_call.group(1),
+           "Cube and Vector sections must use distinct init_core specializations")
+    expect("pto.set_mov_pad_val" in text,
+           "Cube init_core specialization must set the move padding value")
+    expect("pto.set_loop_size_ubtoout" in text and
+           "pto.set_loop_size_outtoub" in text,
+           "Vector init_core specialization must restore DMA loop sizes")
+
+
+def mixed_kernel_survives_full_vpto_pipeline() -> None:
+    @pto.jit(target="a5", mode="explicit", ast_rewrite=False)
+    def mixed_pipeline_probe():
+        with pto.section("cube"):
+            pto.init_core()
+        with pto.section("vector"):
+            pto.init_core()
+
+    with tempfile.TemporaryDirectory() as temp_dir:
+        input_path = Path(temp_dir) / "mixed-init-core.mlir"
+        output_path = Path(temp_dir) / "mixed-init-core-vpto.mlir"
+        input_path.write_text(mixed_pipeline_probe.mlir_text(), encoding="utf-8")
+        result = _core.main(
+            [
+                "ptoas",
+                "--emit-vpto",
+                "--pto-arch=a5",
+                "--pto-backend=vpto",
+                "--vpto-scheduler=off",
+                str(input_path),
+                "-o",
+                str(output_path),
+            ]
+        )
+        expect(result == 0, "mixed init_core must survive the full VPTO pipeline")
+        text = output_path.read_text(encoding="utf-8")
+
+    modules = re.split(r"(?=  module attributes)", text)
+    vector_module = next(
+        part for part in modules if "#pto.kernel_kind<vector>" in part
+    )
+    cube_module = next(
+        part for part in modules if "#pto.kernel_kind<cube>" in part
+    )
+    entry_pattern = re.compile(
+        r"func\.func @mixed_pipeline_probe\(\).*?^    }",
+        re.MULTILINE | re.DOTALL,
+    )
+    vector_entry = entry_pattern.search(vector_module)
+    cube_entry = entry_pattern.search(cube_module)
+    expect(vector_entry is not None, "split Vector module must retain the kernel entry")
+    expect(cube_entry is not None, "split Cube module must retain the kernel entry")
+    expect("pto.set_loop_size_ubtoout" in vector_entry.group(0),
+           "split Vector entry must contain Vector core initialization")
+    expect("pto.set_mov_pad_val" not in vector_entry.group(0),
+           "split Vector entry must not contain Cube core initialization")
+    expect("pto.set_mov_pad_val" in cube_entry.group(0),
+           "split Cube entry must contain Cube core initialization")
+    expect("pto.set_loop_size_" not in cube_entry.group(0),
+           "split Cube entry must not contain Vector core initialization")
+
+
+def mixed_kernel_rejects_unscoped_init_before_sections() -> None:
+    @pto.jit(target="a5", mode="explicit", ast_rewrite=False)
+    def mixed_top_level_probe():
+        pto.init_core()
+        with pto.section("cube"):
+            pass
+        with pto.section("vector"):
+            pass
+
+    expect_raises(
+        RuntimeError,
+        mixed_top_level_probe.mlir_text,
+        "once inside each physical section",
+    )
+
+
+def mixed_kernel_rejects_unscoped_init_after_sections() -> None:
+    @pto.jit(target="a5", mode="explicit", ast_rewrite=False)
+    def mixed_top_level_probe():
+        with pto.section("cube"):
+            pass
+        with pto.section("vector"):
+            pass
+        pto.init_core()
+
+    expect_raises(
+        RuntimeError,
+        mixed_top_level_probe.mlir_text,
+        "once inside each physical section",
+    )
+
+
 def constants_match_reference() -> None:
     @pto.jit(target="a5", mode="explicit", kernel_kind="vector")
     def const_probe(inp: pto.ptr(pto.f32, "gm"), out: pto.ptr(pto.f32, "gm")):
@@ -295,6 +417,11 @@ def main() -> None:
     vector_kernel_emits_full_init_sequence()
     cube_kernel_emits_cube_branch()
     repeated_calls_reuse_one_helper()
+    implicit_vector_kernel_keeps_top_level_init()
+    mixed_kernel_specializes_init_by_physical_section()
+    mixed_kernel_survives_full_vpto_pipeline()
+    mixed_kernel_rejects_unscoped_init_before_sections()
+    mixed_kernel_rejects_unscoped_init_after_sections()
     constants_match_reference()
 
 
