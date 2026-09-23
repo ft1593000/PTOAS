@@ -73,6 +73,9 @@ private:
  
   void UpdateBackwardMatchSync(const SyncOperation *setFlag,
                                const SyncOperation *waitFlag, unsigned eventId);
+  void InsertBackwardMatchBoundarySyncs(const SyncOperation *setFlag,
+                                        SyncOperation &syncFront,
+                                        SyncOperation &syncEnd);
  
   void SetUseEventID(unsigned int begin, unsigned int end,
                      const SyncOperation *setFlag, unsigned int eventId);
