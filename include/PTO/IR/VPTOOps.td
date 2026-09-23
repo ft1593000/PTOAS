@@ -2127,7 +2127,16 @@ def PTO_VsqrtOp : PTO_UnaryVecOp<"vsqrt">;
 def PTO_VnegOp : PTO_UnaryVecOp<"vneg">;
 def PTO_VreluOp : PTO_UnaryVecOp<"vrelu">;
 def PTO_VnotOp : PTO_UnaryVecOp<"vnot">;
-def PTO_VcaddOp : PTO_UnaryVecOp<"vcadd">;
+def PTO_VcaddOp : PTO_UnaryVecOp<"vcadd"> {
+  let description = [{
+    Full-vector sum reduction for 16/32-bit integers (signed, unsigned, or
+    signless), f16, and f32. Eight-bit integer inputs are unsupported and
+    rejected by the verifier; callers must explicitly convert to a supported
+    type before reducing. A 16-bit integer input produces a 32-bit integer
+    result with the same signedness and half as many lanes. Other supported
+    inputs preserve the vector type.
+  }];
+}
 
 def PTO_MadOp : PTO_CubeMicroOp<"mad", [
     AttrSizedOperandSegments,

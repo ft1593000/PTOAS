@@ -1665,12 +1665,11 @@ FailureOr<VRegType> getVcaddResultType(VRegType inputType) {
   if (preservesType) {
     return inputType;
   }
-  unsigned inputWidth = inputIntegerType.getWidth();
-  if (inputWidth != kElementBits8 && inputWidth != kElementBits16) {
+  if (inputIntegerType.getWidth() != kElementBits16) {
     return failure();
   }
   auto resultElementType = IntegerType::get(
-      inputType.getContext(), inputWidth * kPairWidth,
+      inputType.getContext(), kElementBits32,
       inputIntegerType.getSignedness());
   return VRegType::get(inputType.getContext(),
                        inputType.getElementCount() / kPairWidth,

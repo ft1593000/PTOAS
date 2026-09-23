@@ -21,6 +21,9 @@ struct GroupBroadcastLayoutPattern {
 
 static constexpr GroupBroadcastLayoutPattern kGroupBroadcastLayoutPatterns[] = {
     {gbCompact(), gs(8), c()},
+    // Explicit integer truncation preserves each group slot's low byte.
+    {gbCompact(), gs(8, 2), c(), bits<8>(), true},
+    {gbCompact(), gs(8, 4), c(), bits<8>(), true},
     {gbCompact(), gs(1), c()},
     {gb(1, 4), gs(8), ls(4)},
     {gb(1, 2), gs(8), ls(2)},

@@ -103,7 +103,7 @@ dense cast:
 group reduce:
   32-bit input: S=8, S=16, S=32, S=64
   16-bit input: S=16, S=32, S=64, S=128
-  8-bit inputs use the bounded fallback with internal extension
+  direct 8-bit inputs are rejected; explicitly extend to i16/i32 before reducing
   reduce -> group_store
   reduce -> group_slot_load/elemwise -> group_store
   reduce -> group_broadcast -> elemwise -> reduce -> store
@@ -239,9 +239,9 @@ cast boundary:
 
 compute boundary:
   baseline floating compute uses f16/f32.
-  baseline integer grouped reduction compute uses i32 accumulators.  i8/i16
-  storage must be widened first because integer reduction instructions widen
-  narrow inputs.
+  integer grouped reduction supports logical i16/i32 results. Native i16 sums
+  use widened hardware results internally and expose their low halfwords.
+  i8 storage must be explicitly extended to a supported i16/i32 source first.
   f8/i8 are not baseline accumulator/compute element types.
 
 value-indexed accumulation boundary:
@@ -693,8 +693,8 @@ group_reduce_add{f|i}:
   group_slots(G, slots=8, lane_stride=R)
   S>=L && S%L==0 requests source contiguous and result
   group_slots(G, slots=1)
-  A5 has no native 8-bit reduction. The bounded 8-bit fallback widens
-  internally; it is separate from these native VCG layout requests.
+  A5 has no native 8-bit reduction. Direct 8-bit sources, including singleton
+  groups, are rejected before layout assignment; there is no implicit widening.
 
 group_broadcast:
   requests source group_slots(num_groups, slots=K)

@@ -795,6 +795,13 @@ the result lane count is 1. When `group` is provided, the vector is
 partitioned into that many equal-sized groups and a separate reduction is
 performed per group.
 
+**Supported `vcadd` source element types**: `i16`, `si16`, `ui16`, `i32`,
+`si32`, `ui32`, `f16`, and `f32`. Unsupported floating types, including
+`bf16`, are rejected before checking `reassoc` or lowering the operation.
+All three reductions reject direct `i8`, `si8`, and `ui8` sources, including
+singleton groups. Explicitly convert to a supported wider integer type first;
+the reduction then follows that type's identities and result-width semantics.
+
 **Parameters**:
 
 | Parameter | Type | Description |

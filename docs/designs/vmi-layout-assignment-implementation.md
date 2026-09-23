@@ -423,11 +423,10 @@ cast boundary:
 compute / accumulator:
   floating compute baseline: f16/f32, with reassoc required for reductions
   that lower through pair-wise VPTO reductions.
-  integer grouped reduction supports logical i8/i16/i32 within the target
-  shape limits. Narrow integer widening is internal; an explicit cast before
-  reduction changes the algorithm's logical result width.
-  Native i16 sums use gs(8, 2); supported i8 reductions use the bounded
-  internal-extension fallback. Direct f8 reduction remains unsupported.
+  integer grouped reduction supports logical i16/i32 within the target
+  shape limits. Native i16 sums use gs(8, 2) with widened hardware partials;
+  an explicit cast before reduction changes the algorithm's logical width.
+  Direct i8/f8 reduction is unsupported; explicitly extend storage first.
 ```
 
 Important semantic split:
@@ -1323,8 +1322,8 @@ group_reduce_addf:
   with b32 masks. Native i32 sums and integer max/min retain lane_stride=1.
   Full-chunk i16 row-local paths use widening VCADD intermediates internally
   and expose the final low bits in slots=1; widening is not part of the VMI
-  result element type. A5 i8 reductions use the bounded internal-extension
-  fallback rather than native VCGADD/VCADD instructions.
+  result element type. Direct i8 reductions are rejected before layout
+  assignment, including singleton groups; there is no implicit extension.
 
 group_broadcast:
   explicit slots=8/1 source layouts select
@@ -1386,11 +1385,11 @@ Layout assignment:
   compute VLaneElems and L from the logical input element type:
     VLaneElems = 32B / sizeof(input T)
     L          = 256B / sizeof(input T)
-  use the same S formula for f16/f32/i8/i16/i32 once the typed reduce op and target
+  use the same S formula for f16/f32/i16/i32 once the typed reduce op and target
   capability say the type is legal.
   route f8 storage through extf to f32 before group_reduce_addf.
-  keep direct i8/i16 integer reductions in their declared logical type;
-  extsi/extui remains available for explicitly widened algorithms.
+  keep direct i16/i32 reductions in their declared logical type;
+  i8 sources require explicit extsi/extui to supported i16/i32 first.
   route integer narrowing to i8 through trunci; direct i8 compute remains
   illegal unless target capability and explicit op semantics define that
   lowering.
@@ -1420,10 +1419,11 @@ VMI-to-VPTO:
   attrs/operands, but does not invent a new global layout plan.
 
 Tests:
-  cover direct i8/i16/i32 grouped reductions and explicitly widened variants.
+  cover direct i16/i32 grouped reductions and explicitly widened variants;
+  reject direct i8 reductions through public and legacy entry points.
   add i32 S=8/S=16/S=32/S=64 group-reduce cases.
   add f8 storage -> extf -> f32 group_reduce_addf cases.
-  add i8/i16 full-chunk VCADD plus bitcast cases.
+  add i16 full-chunk VCADD plus bitcast cases.
   retain invalid f8 and unsupported group-shape diagnostics.
 ```
 

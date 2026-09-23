@@ -1981,6 +1981,12 @@ dup_highest = pto.vdup(vec, mask32, pto.PositionMode.HIGHEST)
 
 **Description**: Full-vector sum reduction. Result placed in lane 0.
 
+**Types**: 16/32-bit integers (signed, unsigned, or signless), `f16`, and `f32`.
+Eight-bit integer inputs are rejected; explicitly convert to a supported type
+before reducing. A 16-bit integer input returns 32-bit integer elements with the
+same signedness and half as many lanes. Other supported inputs preserve their
+vector type.
+
 #### `pto.vcmax(vec: VRegType, mask: MaskType) -> VRegType`
 
 **Description**: Full-vector max with argmax. Result lane 0 = max value, lane 1 = max index.

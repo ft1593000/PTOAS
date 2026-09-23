@@ -302,7 +302,7 @@ VMILayoutSupport::getPreferredGroupReduceLayoutFact(VMIGroupReduceKind kind,
                                                     VMIVRegType sourceType,
                                                     int64_t numGroups,
                                                     std::string *reason) const {
-  FailureOr<GroupLayoutKey> key = buildGroupLayoutKey(
+  FailureOr<GroupLayoutKey> key = buildGroupReduceLayoutKey(
       sourceType, numGroups,
       "group_reduce layout supports group sizes of 1/4, 1/2, 1, 2, or 4 "
       "32B VCG blocks, or full physical chunk multiples",
@@ -343,7 +343,7 @@ VMILayoutSupport::getGroupReduceLayoutFactForLayouts(
     return fail("requires assigned source, mask, and result layouts");
   }
 
-  FailureOr<GroupLayoutKey> key = buildGroupLayoutKey(
+  FailureOr<GroupLayoutKey> key = buildGroupReduceLayoutKey(
       sourceType, numGroups,
       "group_reduce layout table has no row for this group size", reason);
   if (failed(key)) {
@@ -393,7 +393,7 @@ VMILayoutSupport::getGroupReduceLayoutFactsForLayout(
     return fail("requires assigned group_reduce layout query port");
   }
 
-  FailureOr<GroupLayoutKey> key = buildGroupLayoutKey(
+  FailureOr<GroupLayoutKey> key = buildGroupReduceLayoutKey(
       sourceType, numGroups,
       "group_reduce layout table has no row for this group size", reason);
   if (failed(key)) {

@@ -36,9 +36,14 @@ LogicalResult VMILayoutSupport::getGroupReduceShapeSupport(
          << *size * getPTOStorageElemBitWidth(sourceType.getElementType()) /
                 mlir::pto::kValue8;
     }
-    os << ": no executable A5 grouped-reduction layout; dense fallback requires "
-          "one physical input carrier and at most eight groups; native paths "
-          "require 16/32-bit elements and a supported predicate width";
+    auto integerType = dyn_cast<IntegerType>(sourceType.getElementType());
+    if (integerType && integerType.getWidth() == mlir::pto::kValue8) {
+      os << ": 8-bit integer reductions are not supported; explicitly convert "
+            "the source to a supported 16-bit or 32-bit type";
+    } else {
+      os << ": no executable A5 grouped-reduction layout; requires supported "
+            "16/32-bit elements, predicate width, and source/mask/result layouts";
+    }
   }
   return failure();
 }

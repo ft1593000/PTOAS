@@ -6128,17 +6128,21 @@ pto.vmi.group_reduce_addf %x8, %mask
 
 ### 3.55 8-bit Integer Group Reduce
 
-A5 has no native i8 `vcgadd` or `vcadd`. Logical i8 reductions accepted by the
-bounded one-carrier fallback extend the input internally before reducing;
-`L=256` is unpacked into two 16-bit halves. The final logical result retains
-i8 wraparound semantics, and min/max retain the original i8 identities for
-empty groups. Unsupported shapes are diagnosed before final conversion.
+Direct `i8`, `si8`, and `ui8` inputs to VMI integer reductions are rejected
+before layout assignment, including singleton groups. There is no native or
+implicit-widening fallback. Direct micro `pto.vcadd` also rejects 8-bit integer
+inputs in its verifier.
 
-This path does not use the native 16-bit group-sum `gs(8,2)` producer rule:
-it assembles scalar results through the dense fallback. See the executable
-shape limits and internal-extension contract in [Reduce](../isa/vmi-isa/05-reduce.md).
-An explicit `extsi`/`extui` before reduction remains available when the
-algorithm requires a wider logical result.
+```text
+i8 source -> group_reduce_addi
+  -> VMI-UNSUPPORTED: 8-bit integer reductions are not supported
+```
+
+Callers must explicitly use `extsi` or `extui` to convert to a supported 16-bit
+or 32-bit source before reduction. The reduction then follows the wider type's
+identities and result-width semantics; truncation does not restore the original
+8-bit empty min/max identity automatically. See [Reduce](../isa/vmi-isa/05-reduce.md)
+for the supported shapes and explicit conversion paths.
 
 ### 3.56 Full 256-Bin Distribution Histogram
 

@@ -1308,8 +1308,10 @@ for (int i = groups; i < M; i++)
 
 For A5 reduction result types:
 
-- `pto.vcadd` widens `i16 -> i32` and `u16 -> u32`, with the lane count halved.
-- `pto.vcadd` keeps the same result type for `f16`, `f32`, `i32`, and `u32`.
+- `pto.vcadd` rejects 8-bit integer inputs, including direct micro IR.
+- `pto.vcadd` widens 16-bit integers to 32-bit integers, preserving signedness
+  (signed, unsigned, or signless) and halving the lane count.
+- `pto.vcadd` keeps the same result type for `f16`, `f32`, and 32-bit integers.
 - A5 has no native 8-bit row or VLane reduction instruction.
 - For native 16-bit integer `pto.vcgadd`, VMI exposes the low halfwords as
   `gs(8, 2)`. Consumers may convert them to consecutive slots, while the

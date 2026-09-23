@@ -46,12 +46,13 @@ than forward the full hardware sum. Examples:
 | `si16(-32768 - 1)` → `si32` | `32767` |
 
 The existing group-slot cast lowering implements extension with `vcvt EVEN`.
-Narrowing to `ui8` records `gs(8, 4)` and covers the 16 halfword positions
-with its conversion mask, for both saturating and nonsaturating casts. Stores
-use their normal layout conversions where needed.
+Narrowing to `ui8` records `gs(8, 4)`. `NOSAT` exposes the low bytes through
+a bitcast; `SAT` covers the 16 halfword positions with its conversion mask.
+Stores use their normal layout conversions where needed.
 Integer grouped broadcasts use the existing selector's source stride for
-both the index ramp and its base slot. The added broadcast table rows are
-limited to 16-bit integers, preserving floating-point layout choices.
+both the index ramp and its base slot. Native sum broadcast rows are limited
+to 16-bit integers. Compact 8-bit broadcasts can also consume the low-byte
+`gs(8, 4)` result of explicit truncation; floating-point choices are unchanged.
 An `ls(2)` view of a single `gs(8, 2)` packet forwards the same register; this
 also lets a subsequent half-block reduction read the low halfwords directly.
 
@@ -86,14 +87,16 @@ path it would also put a `b32` reduction predicate on a `b16` arithmetic op.
   stores, broadcasts, casts and shared users, plus the 32-bit partial-sum
   predicates and pack-free widening chains through the public CLI.
 - `vmi_native_group_sum_trunc.pto` checks strided 16-to-8-bit narrowing
-  and the predicate that includes all eight logical values, plus the matching
+  as a low-byte view for NOSAT and a predicate covering all eight values for SAT,
+  plus the matching
   mask-granularity cast (both layouts address the same physical `b32` lanes).
 - `vmi_to_vpto_ensure_group_slot_layout.pto` checks the matching-stride
   packet/dense identity in both directions.
 - `vmi_native_i16_group_sum.py` compares signed, unsigned and signless
   results against independent integer arithmetic, including empty, tail,
   full, holey and middle-empty masks, overflow and underflow. It checks
-  stores, broadcasts, extension, truncation, pointwise addition and a
+  stores, broadcasts (including supported 8-bit broadcasts after truncation),
+  extension, truncation, pointwise addition and a
   subsequent reduction, with multiple users of each native sum. Entire
   output buffers are compared, including untouched canaries.
 

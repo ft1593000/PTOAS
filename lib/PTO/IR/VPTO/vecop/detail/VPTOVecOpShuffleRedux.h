@@ -94,15 +94,10 @@ using namespace mlir::pto;
     Type expectedResultElemType = inputElemType;
     int64_t expectedResultLanes = inputType.getElementCount();
     if (auto inputInt = dyn_cast<IntegerType>(inputElemType)) {
-      if (inputInt.getWidth() < mlir::pto::kValue8 ||
-          inputInt.getWidth() > mlir::pto::kValue32) {
+      if (inputInt.getWidth() != mlir::pto::kValue16 &&
+          inputInt.getWidth() != mlir::pto::kValue32) {
         return op.emitOpError(
-            "requires 8-bit, 16-bit, or 32-bit integer vector element type");
-      }
-      if (inputInt.getWidth() == mlir::pto::kValue8) {
-        expectedResultElemType =
-            IntegerType::get(op.getContext(), mlir::pto::kValue16, inputInt.getSignedness());
-        expectedResultLanes = inputType.getElementCount() / mlir::pto::kValue2;
+            "requires 16-bit or 32-bit integer vector element type");
       }
       if (inputInt.getWidth() == mlir::pto::kValue16) {
         expectedResultElemType =

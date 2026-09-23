@@ -181,8 +181,8 @@ static constexpr GroupReduceLayoutPattern kGroupReduceLayoutPatterns[] = {
     //   {gbCompact(), c(), gs(8)}
     // It is removed (upstream MR) because the dense masked-row fallback below
     // covers every shape it matched: the reachable rows above already claim the
-    // native one-block / ratio shapes, and anything left -- small or eight-bit
-    // groups with no native row -- lowers through the slots=1 dense fallback.
+    // native one-block / ratio shapes, and remaining supported groups with no
+    // native row lower through the slots=1 dense fallback.
     // Do not add a dense one-carrier row back (for example {gb(4), c(), gs(8)}
     // for 128xf32 group=4); the slots=1 form is the contract, pinned by
     // vmi_to_vpto_group_reduce_gb4_contiguous_slots1.pto.

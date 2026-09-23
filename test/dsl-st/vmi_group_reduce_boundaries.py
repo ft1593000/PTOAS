@@ -120,7 +120,6 @@ def check_case(inputs, expected):
 
 
 TYPE_CASES = (
-    ("i8", pto.i8, np.uint8), ("si8", pto.si8, np.int8), ("ui8", pto.ui8, np.uint8),
     ("i16", pto.i16, np.uint16), ("si16", pto.si16, np.int16), ("ui16", pto.ui16, np.uint16),
     ("i32", pto.i32, np.uint32), ("si32", pto.si32, np.int32), ("ui32", pto.ui32, np.uint32),
     ("f16", pto.f16, np.float16), ("f32", pto.f32, np.float32),

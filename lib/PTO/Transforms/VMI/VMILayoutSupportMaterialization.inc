@@ -106,7 +106,7 @@ inline bool matchesCompactGroupShape(int64_t elementCount,
                                      int64_t vcgBlockElems,
                                      int64_t groupSize) {
   // One physical input carrier and at most one eight-slot result packet.
-  // Eight-bit inputs use two instruction-local 16-bit carriers after unpack.
+  // Shared with broadcast, which also supports eight-bit elements.
   bool supportedWidth =
       matchesElementCountPattern(N<8, 16, 32>(), vcgBlockElems);
   bool supportedLength = matchesElementCountPattern(
@@ -289,13 +289,28 @@ buildGroupLayoutKey(VMIVRegType type, int64_t numGroups,
                         vcgBlockElems, *blockClass};
 }
 
+// Gate all reduction queries before either native rows or the dense fallback.
+// Broadcast keeps using buildGroupLayoutKey, including its eight-bit layouts.
+inline FailureOr<GroupLayoutKey>
+buildGroupReduceLayoutKey(VMIVRegType type, int64_t numGroups,
+                          const char *unsupportedGroupSizeReason,
+                          std::string *reason) {
+  auto integerType = dyn_cast<IntegerType>(type.getElementType());
+  if (integerType && integerType.getWidth() == mlir::pto::kValue8) {
+    if (reason) {
+      *reason = "8-bit integer reductions are not supported; explicitly convert "
+                "the source to a supported 16-bit or 32-bit type";
+    }
+    return failure();
+  }
+  return buildGroupLayoutKey(type, numGroups, unsupportedGroupSizeReason, reason);
+}
+
 inline bool isExecutableGroupReducePattern(const GroupReduceLayoutPattern &pattern,
                                            GroupLayoutKey key) {
   if (pattern.block.kind == GroupBlockPatternKind::Compact) {
     return true;
   }
-  // Eight-bit grouped reductions never reach a plan: the group_reduce verifier
-  // rejects eight-bit integer sources, so no table row has to exclude them.
   // A deinterleaved source needs at least one whole physical chunk per
   // deinterleaved group; otherwise the producing load has no lowering and the
   // dense masked-row plan has to be used instead.
@@ -366,8 +381,7 @@ makeDenseRowsGroupReduceFact(MLIRContext *ctx, GroupLayoutKey key,
   // result part per group instead of packing a single slot packet, so the dense
   // fallback needs no vdup/vsel stitching and the consumer sees each group value
   // as its own physical vector.  Single-element integer groups keep the packet
-  // form because that is the only path that materializes the widen/narrow
-  // identity.
+  // form so the source and masked identity can be selected in one vector.
   int64_t slots = key.groupSize == 1 ? mlir::pto::kValue8 : 1;
   fact.resultLayout = VMILayoutAttr::getGroupSlots(ctx, numGroups, slots);
   fact.groupSize = key.groupSize;

@@ -1446,6 +1446,15 @@ private:
           op, "physical select part type mismatch");
       return failure();
     }
+    auto elementMask = getMaskTypeForVReg(cast<VRegType>(resultType),
+                                         rewriter.getContext());
+    if (failed(elementMask)) {
+      return failure();
+    }
+    bool needsPredicateView = mask.getType() != *elementMask;
+    if (needsPredicateView) {
+      mask = rewriter.create<PbitcastOp>(op.getLoc(), *elementMask, mask);
+    }
     return rewriter
         .create<VselOp>(op.getLoc(), resultType, trueValue, falseValue, mask)
         .getResult();

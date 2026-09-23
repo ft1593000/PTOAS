@@ -78,6 +78,8 @@ def build_kernel(label, lanes, groups, name):
           pto.vmi.vstore %extended, %w[%c1], %c1 {{group = {groups}}} : !pto.vmi.vreg<{groups}x{wide}>, !pto.ptr<{wide}, ub>
           %truncated = pto.vmi.trunci %sum {{saturate = "NOSAT"}} : {packet} -> !pto.vmi.vreg<{groups}xui8>
           pto.vmi.vstore %truncated, %n[%c3], %c1 {{group = {groups}}} : !pto.vmi.vreg<{groups}xui8>, !pto.ptr<ui8, ub>
+          %narrow_brc = pto.vmi.vbrc %truncated {{group = {groups}}} : !pto.vmi.vreg<{groups}xui8> -> !pto.vmi.vreg<{lanes}xui8>
+          pto.vmi.vstore %narrow_brc, %n[%c512] : !pto.vmi.vreg<{lanes}xui8>, !pto.ptr<ui8, ub>
           %saturated = pto.vmi.trunci %sum {{saturate = "SAT"}} : {packet} -> !pto.vmi.vreg<{groups}xui8>
           pto.vmi.vstore %saturated, %n[%c256], %c1 {{group = {groups}}} : !pto.vmi.vreg<{groups}xui8>, !pto.ptr<ui8, ub>
           %all = pto.vmi.create_mask %groups : index -> !pto.vmi.mask<{groups}xpred>
@@ -91,6 +93,10 @@ def build_kernel(label, lanes, groups, name):
         pto.set_flag["PIPE_V", "PIPE_MTE3", "EVENT_ID0"]
         pto.wait_flag["PIPE_V", "PIPE_MTE3", "EVENT_ID0"]
 '''
+    # One-carrier 8-bit broadcasts consume the truncated native gs(8, 4) packet.
+    if lanes > 256 or groups > 8:
+        source = "\n".join(line for line in source.splitlines()
+                           if "%narrow_brc" not in line) + "\n"
     if label == "i16":
         source = "\n".join(line for line in source.splitlines()
                            if "%saturated =" not in line and "vstore %saturated" not in line) + "\n"
@@ -157,6 +163,8 @@ def make_case(npdtype, lanes, groups, mode, check_saturation):
         expected[0][1856 + group] = values.min() if values.size else limits.max
         expected[1][1 + group] = total
         expected[2][3 + group] = total % 256
+        if lanes <= 256 and groups <= 8:
+            expected[2][512 + begin:512 + end] = total % 256
         if check_saturation:
             expected[2][256 + group] = min(255, max(0, total))
     if groups <= 8:

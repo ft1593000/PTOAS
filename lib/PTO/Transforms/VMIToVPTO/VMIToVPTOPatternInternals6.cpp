@@ -775,6 +775,23 @@ private:
     bool supportsPacked = modes->second;
 
     StringAttr sat = op->getAttrOfType<StringAttr>("saturate");
+    if (sourceLogicalBits == 16 && resultLogicalBits == 8 &&
+        sat && sat.getValue() == "NOSAT") {
+      // slots=8 doubles the source lane stride for low bytes; slots=1 has
+      // only lane zero live. Neither view needs a conversion instruction.
+      // In particular, A5 has no signed 16-to-signed-8 vcvt instruction.
+      SmallVector<Value> results;
+      for (auto [source, type] : llvm::zip_equal(sourceParts, resultTypes)) {
+        auto result = bitcastVReg(op.getLoc(), source, cast<VRegType>(type),
+                                 rewriter);
+        if (failed(result)) {
+          return failure();
+        }
+        results.push_back(*result);
+      }
+      finalizeResults(op, results, false, resultTypes, rewriter);
+      return success();
+    }
     // Native 16-bit sums occupy the even halfword lanes. Include the whole
     // strided packet so all eight low halves reach the narrowing conversion.
     int64_t activeLanes = sourceLayout.getSlots() * sourceLayout.getLaneStride();

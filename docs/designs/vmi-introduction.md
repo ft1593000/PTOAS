@@ -192,12 +192,16 @@ group-slot control-flow/function boundary
 ## 3. Pass Pipeline
 
 ```text
-pto-validate-vmi-ir
+pto-vmi-normalize-signless-int-to-unsigned (func.func)
+  -> vmi-lower-unified-to-legacy
+  -> vmi-legalize-arith-select
+  -> pto-validate-vmi-ir
+  -> vmi-mask-granularity-assignment
   -> vmi-layout-assignment
   -> canonicalize/cse
-  -> vmi-layout-fold
-  -> canonicalize/cse
   -> vmi-layout-rematerialize
+  -> canonicalize/cse
+  -> vmi-layout-fold
   -> canonicalize/cse
   -> vmi-layout-sink-materialization
   -> canonicalize/cse
@@ -205,6 +209,13 @@ pto-validate-vmi-ir
   -> pto-validate-vmi-layout-ir
   -> vmi-to-vpto
 ```
+
+上图省略部分 canonicalize/CSE 和布局优化，完整顺序以
+`tools/ptoas/ptoas_pipeline.cpp::appendVMISemanticPipeline` 为准。
+公开 reduce 接口及 legacy reduction 均拒绝 8 位整数输入，包括 singleton。
+需要从 8 位数据归约时，调用方应显式转换到受支持的 16/32 位类型；编译器
+不再自动扩宽。宽类型归约、显式截断和 8 位广播按各自的类型与布局约束处理。
+详见 [Reduce](../isa/vmi-isa/05-reduce.md)。
 
 ### 3.1 `pto-validate-vmi-ir`
 

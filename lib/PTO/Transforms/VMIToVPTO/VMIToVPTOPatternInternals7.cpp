@@ -1582,6 +1582,12 @@ checkSupportedReduceShape(OpTy op, bool requiresReassoc,
   if (requiresReassoc && !op->hasAttr("reassoc")) {
     return fail("requires reassoc attr for pair-wise floating-point vcadd");
   }
+  auto sourceType = cast<VMIVRegType>(op.getSource().getType());
+  auto integerType = dyn_cast<IntegerType>(sourceType.getElementType());
+  if (integerType && integerType.getWidth() == mlir::pto::kValue8) {
+    return fail("8-bit integer reductions are not supported; explicitly convert "
+                "the source to a supported 16-bit or 32-bit type");
+  }
   FailureOr<ReducePhysicalShapePlan> plan =
       buildReducePhysicalShapePlan(op, reason);
   if (failed(plan)) {

@@ -19,6 +19,16 @@ namespace {
 constexpr unsigned kWideToHalfBitRatio = 2;
 } // namespace
 
+static LogicalResult verifyReductionSourceWidth(Operation *op, Type elementType) {
+  auto integerType = dyn_cast<IntegerType>(elementType);
+  if (integerType && integerType.getWidth() == mlir::pto::kValue8) {
+    return op->emitOpError(
+        "VMI-UNSUPPORTED: 8-bit integer reductions are not supported; "
+        "explicitly convert the source to a supported 16-bit or 32-bit type");
+  }
+  return success();
+}
+
 // NOLINTNEXTLINE(readability-make-member-function-const): ODS-generated
 // verifier callbacks have a non-const signature.
 LogicalResult VMIGroupIotaOp::verify() {
@@ -66,6 +76,10 @@ LogicalResult VMIReduceAddIOp::verify() {
   auto sourceType = cast<VMIVRegType>(getSource().getType());
   auto maskType = cast<VMIMaskType>(getMask().getType());
   auto resultType = cast<VMIVRegType>(getResult().getType());
+  if (failed(verifyReductionSourceWidth(getOperation(),
+                                        sourceType.getElementType()))) {
+    return failure();
+  }
   if (!isVMIIntegerLikeType(sourceType.getElementType())) {
     return emitOpError("requires integer-like VMI source element type");
   }
@@ -140,11 +154,14 @@ template <typename OpTy> static LogicalResult verifyReduceMinMaxIOp(OpTy op) {
   auto sourceType = cast<VMIVRegType>(op.getSource().getType());
   auto maskType = cast<VMIMaskType>(op.getMask().getType());
   auto resultType = cast<VMIVRegType>(op.getResult().getType());
+  if (failed(verifyReductionSourceWidth(op, sourceType.getElementType()))) {
+    return failure();
+  }
   auto sourceIntegerType = dyn_cast<IntegerType>(sourceType.getElementType());
   if (!sourceIntegerType ||
       !isVMIAnyI8I16I32Type(sourceType.getElementType())) {
     return op.emitOpError(
-        "requires 8-bit, 16-bit, or 32-bit integer source element type");
+        "requires 16-bit or 32-bit integer source element type");
   }
   if (sourceType.getElementType() != resultType.getElementType()) {
     return op.emitOpError("requires source and result element types to match");
@@ -244,6 +261,9 @@ static LogicalResult verifyGroupReduceIntegerOp(OpTy op) {
   auto sourceType = cast<VMIVRegType>(op.getSource().getType());
   auto maskType = cast<VMIMaskType>(op.getMask().getType());
   auto resultType = cast<VMIVRegType>(op.getResult().getType());
+  if (failed(verifyReductionSourceWidth(op, sourceType.getElementType()))) {
+    return failure();
+  }
   if (!isVMIIntegerLikeType(sourceType.getElementType())) {
     return op.emitOpError("requires integer-like VMI source element type");
   }
@@ -577,6 +597,9 @@ LogicalResult verifyVCReductionElementAndMask(Operation *op,
                                                      VMIMaskType maskType,
                                                      bool &isFloat) {
   Type elemTy = sourceType.getElementType();
+  if (failed(verifyReductionSourceWidth(op, elemTy))) {
+    return failure();
+  }
   if (failed(verifyBF16x2ComputeElementType(op, elemTy))) {
     return failure();
   }

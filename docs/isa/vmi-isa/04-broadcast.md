@@ -61,12 +61,16 @@
 
 - **datatypes:** `i8`–`i32`, `f16`, `bf16`, `f32`
 - **Bounded grouped vectors:** For the one-carrier lengths documented in
-  [Reduce](05-reduce.md), a group count of at most eight that divides `L`
+  [Reduce](05-reduce.md), plus eight-bit integer lengths
+  `L = 1, 2, 4, 8, 64, 128, 256`, a group count of at most eight that divides `L`
   broadcasts compact source slot `g` into logical lanes
   `[g * L/C, (g + 1) * L/C)`. The A5 VPTO backend retains established native
   layouts when available and uses a dense register-selection fallback otherwise.
   The source can come from a short load or a grouped reduction. Padding lanes
-  in the physical register are not logical results.
+  in the physical register are not logical results. The dense fallback also
+  accepts stride-two and stride-four group slots produced by explicit 16-to-8
+  `NOSAT` narrowing after a supported wide reduction; selection reads the low byte of each
+  slot and ignores the intervening high bytes.
 - **Group slots and output layout:** Source-slot spacing and broadcast-output
   spacing describe different values. Native 16-bit integer addition produces
   eight low halfwords at positions `0, 2, ..., 14`, so its result is

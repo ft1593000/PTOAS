@@ -13,8 +13,8 @@ Operations that reduce a vector to a scalar or per-group result.
 - Reduction results are written into the low-significance portion of the
   destination vector and the remaining destination bits are zero-filled.
 - A5 has no native 8-bit `vcadd`, `vcmax`, `vcmin`, `vcgadd`, `vcgmax`, or
-  `vcgmin` form. Supported 8-bit VMI reductions extend their inputs before
-  using these physical operations.
+  `vcgmin` form. VMI rejects direct 8-bit integer reduction inputs; callers
+  must explicitly convert to a supported 16/32-bit type before reducing.
 
 ---
 
@@ -24,6 +24,9 @@ Operations that reduce a vector to a scalar or per-group result.
 
 - **syntax:** `%result = pto.vcadd %input, %mask : !pto.vreg<NxT>, !pto.mask<G> -> !pto.vreg<MxU>`
 - **A5 types:** i16/i32 (signed, unsigned, or signless), f16, f32
+- **verification:** Direct micro IR with an `i8`, `si8`, or `ui8` input is
+  rejected with `requires 16-bit or 32-bit integer vector element type`,
+  even when no VMI passes run. There is no implicit 8-to-16-bit widening.
 - **semantics:** Sum all elements. Result in lane 0, others zeroed.
 
 ```c

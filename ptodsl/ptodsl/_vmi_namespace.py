@@ -209,6 +209,12 @@ def _is_vmi_vmula_element_type(type_obj) -> bool:
     )
 
 
+def _is_vmi_vcadd_element_type(type_obj) -> bool:
+    if IntegerType.isinstance(type_obj):
+        return IntegerType(type_obj).width in (16, 32)
+    return F16Type.isinstance(type_obj) or F32Type.isinstance(type_obj)
+
+
 def _isinstance_pto_type(type_obj, type_name: str) -> bool:
     type_cls = getattr(_pto, type_name, None)
     if type_cls is None:
@@ -548,6 +554,12 @@ def _derive_vgatherb_result_type(source, mask, *, context: str):
 
 def _derive_vmi_reduce_result_type(source, group, *, context: str):
     source_type = _as_vmi_vreg_type(_type_of(source), context=context)
+    element_type = source_type.element_type
+    if IntegerType.isinstance(element_type) and IntegerType(element_type).width == 8:
+        raise ValueError(
+            f"{context}: 8-bit integer reductions are not supported; "
+            "explicitly convert the source to a supported 16-bit or 32-bit type"
+        )
     result_lanes = 1
     if group is not None:
         try:
@@ -739,8 +751,14 @@ def _emit_reduce(
     reassoc=_UNSPECIFIED,
 ):
     context = f"pto.vmi.{op_name}(...)"
+    result_type = _derive_vmi_reduce_result_type(source, group, context=context)
     if op_name == "vcadd":
         source_elem_type = _vmi_element_type(_type_of(source), context=context)
+        if not _is_vmi_vcadd_element_type(source_elem_type):
+            raise TypeError(
+                f"{context} requires a 16-bit or 32-bit integer, f16, or f32 "
+                f"source vector; got {source_elem_type}"
+            )
         if reassoc is _UNSPECIFIED:
             if _is_vmi_float_element_type(source_elem_type):
                 raise TypeError(
@@ -757,7 +775,7 @@ def _emit_reduce(
         kwargs["reassoc"] = UnitAttr.get()
     return _call_value(
         op_name,
-        _derive_vmi_reduce_result_type(source, group, context=context),
+        result_type,
         _raw(source),
         _required_mask(mask, context=context),
         **kwargs,

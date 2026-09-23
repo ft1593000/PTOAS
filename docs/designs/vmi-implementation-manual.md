@@ -124,12 +124,16 @@ enable or disable switch. The pipeline is ordered around vecscope inference as
 follows:
 
 ```text
+pto-vmi-normalize-signless-int-to-unsigned (func.func)
+vmi-lower-unified-to-legacy
+vmi-legalize-arith-select
 pto-validate-vmi-ir
+vmi-mask-granularity-assignment
 vmi-layout-assignment
 canonicalize/cse
-vmi-layout-fold
-canonicalize/cse
 vmi-layout-rematerialize
+canonicalize/cse
+vmi-layout-fold
 canonicalize/cse
 vmi-layout-sink-materialization
 canonicalize/cse
@@ -145,6 +149,14 @@ canonicalize/CSE
 
 The pipeline only applies when the effective backend is VPTO. EmitC does not
 run it because the pipeline produces physical VPTO values and ops.
+
+Eight-bit integer reduction sources are rejected by public and legacy IR
+verification, including singleton groups. Callers must explicitly convert to
+a supported 16-bit or 32-bit type before reducing; no legalization pass or
+instruction-local widening is provided. See [Reduce](../isa/vmi-isa/05-reduce.md)
+for the supported types and regression commands. This overview omits auxiliary
+optimization passes; the complete order lives in `appendVMISemanticPipeline`
+in `tools/ptoas/ptoas_pipeline.cpp`.
 
 The VPTO/VMI user-facing entry also rejects public functions whose
 signature contains `!pto.vmi.*`.
@@ -3194,7 +3206,7 @@ pto.vmi.group_reduce_addf:
 
 pto.vmi.group_reduce_addi / group_reduce_maxi / group_reduce_mini:
   semantic:
-    source and result use the same i8/i16/i32 element type
+    source and result use the same i16/i32 element type
     the result has one group-slot value per logical group
     integer addition has same-type wraparound semantics
   layout assignment:
@@ -3215,11 +3227,10 @@ pto.vmi.group_reduce_addi / group_reduce_maxi / group_reduce_mini:
     native 16-bit integer vcgadd is excluded from source-first reduction
     combining, even when masks are equivalent; other paths apply that
     optimization only when the physical rewrite is legal
-    A5 has no native i8 reduction: supported one-carrier cases extend inputs
-    internally before reducing and preserve the logical i8 result semantics
-    the widening is internal and is not exposed in the VMI type contract
+    A5 has no native i8 reduction: direct i8 inputs are rejected before layout
+    assignment, including singleton groups; explicitly extend to i16/i32 first
   unsupported cases:
-    element types other than i8/i16/i32
+    element types other than i16/i32
     group sizes outside the registered high-performance group-block classes
 
 pto.vmi.group_broadcast:
@@ -3277,7 +3288,7 @@ pto.vmi.reduce_maxf / reduce_minf / reduce_maxi / reduce_mini:
     result natural layout is contiguous
     mask use is requested as contiguous with granularity derived from source element width
   current direct lowering:
-    source element type must be f16/f32 for the floating ops or i8/i16/i32 for
+    source element type must be f16/f32 for the floating ops or i16/i32 for
     the integer ops
     source must materialize to one or more full physical chunks with no padding logical lanes
     init/result must be 1-lane VMI vectors and each materialize to one physical chunk
@@ -3299,7 +3310,7 @@ pto.vmi.reduce_maxf / reduce_minf / reduce_maxi / reduce_mini:
   unsupported cases:
     bf16/fp8/f64 until VPTO reduction and combine semantics are designed
     partial/tail source chunks because padding lanes must not participate
-    integer widths other than i8/i16/i32
+    integer widths other than i16/i32
 
 pto.vmi.select:
   current direct lowering is a storage-width select rather than a semantic

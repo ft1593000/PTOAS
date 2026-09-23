@@ -1048,7 +1048,7 @@ static std::optional<WalkResult> verifySupportedVMIGroupIntegerReductionOp(
     return verifySupportedGroupReduceOp(
         reduce,
         "pto.vmi.group_reduce_addi lowers through pto.vcgadd/vadd for "
-        "supported 32B block classes or through an internal widening "
+        "supported 32B block classes or through a widened-result "
         "pto.vcadd path for aligned full chunks (");
   }
   if (auto reduce = dyn_cast<VMIGroupReduceMaxIOp>(op)) {

@@ -10,8 +10,6 @@
 //===- VMIToVPTOPatternInternals5.inc - VMIToVPTO internals -*- C++ -*-===//
 //===----------------------------------------------------------------------===//
 
-constexpr int64_t kWidePartElemThreshold = 128;
-
 template <typename OpTy, typename GroupReduceOpTy, typename RowReduceOpTy,
           typename CombineOpTy>
 struct OneToNVMIGroupReduceOpPattern : OneToNOpConversionPattern<OpTy> {
@@ -29,55 +27,6 @@ private:
                              : APInt::getMaxValue(width).getZExtValue();
     }
     return 0;
-  }
-
-  FailureOr<std::pair<Value, Value>> prepareCompactReduction(
-      OpTy op, Value source, Value mask, int64_t partIndex,
-      OneToNPatternRewriter &rewriter) const {
-    auto sourceType = cast<VRegType>(source.getType());
-    auto elementType = dyn_cast<IntegerType>(sourceType.getElementType());
-    bool needsWidening = elementType && elementType.getWidth() == kElementBits8;
-    if (!needsWidening) {
-      return std::make_pair(source, mask);
-    }
-    // Widen each half inside the instruction lowering, without changing the
-    // logical VMI value's one-carrier layout.
-    auto wideElementType = IntegerType::get(
-        rewriter.getContext(), kElementBits16,
-        elementType.isSigned() ? IntegerType::SignednessSemantics::Signed
-                               : IntegerType::SignednessSemantics::Unsigned);
-    auto wideType = VRegType::get(rewriter.getContext(),
-                                  sourceType.getElementCount() / kPairWidth,
-                                  wideElementType);
-    Value part = rewriter.create<arith::ConstantIndexOp>(op.getLoc(), partIndex);
-    Value extended = elementType.isSigned()
-                         ? rewriter.create<VsunpackOp>(op.getLoc(), wideType,
-                                                       source, part).getResult()
-                         : rewriter.create<VzunpackOp>(op.getLoc(), wideType,
-                                                       source, part).getResult();
-    auto wideMaskType = MaskType::get(rewriter.getContext(), "b16");
-    Value wideMask = rewriter.create<PunpackOp>(
-        op.getLoc(), wideMaskType, mask,
-        rewriter.getStringAttr(partIndex == 0 ? "LOWER" : "HIGHER"));
-    if constexpr (std::is_same_v<OpTy, VMIGroupReduceAddIOp>) {
-      // Add has the same zero identity before and after extension.
-      return std::make_pair(extended, wideMask);
-    }
-    FailureOr<Value> allMask = createAllTrueMask(op.getLoc(), wideMaskType, rewriter);
-    FailureOr<Value> identity = createScalarOffsetConstant(
-        op.getLoc(), rewriter.getI16Type(), getCompactIntegerIdentity(elementType), rewriter);
-    bool failedMaterialization = failed(allMask) || failed(identity);
-    if (failedMaterialization) {
-      return failure();
-    }
-    // Fill inactive lanes with the original element type's identity. Using
-    // the widened type's extrema would change an empty signed min/max group
-    // when its result is narrowed back to eight bits.
-    Value neutral = rewriter.create<VdupOp>(op.getLoc(), wideType, *identity,
-                                           *allMask, /*position=*/nullptr);
-    Value selected = rewriter.create<VselOp>(op.getLoc(), wideType, extended,
-                                            neutral, wideMask);
-    return std::make_pair(selected, *allMask);
   }
 
   LogicalResult lowerSingletonGroups(
@@ -211,38 +160,6 @@ private:
            layout.getNumGroups() == numGroups && layout.getSlots() == 1;
   }
 
-  // Collects the (source, mask) carriers each group value is reduced from.
-  FailureOr<SmallVector<std::pair<Value, Value>, kPairWidth>>
-  collectCompactInputs(OpTy op, ValueRange sourceParts, ValueRange maskParts,
-                       bool twoWideParts,
-                       OneToNPatternRewriter &rewriter) const {
-    SmallVector<std::pair<Value, Value>, kPairWidth> inputs;
-    if (!twoWideParts) {
-      // A grouped reduction over a contiguous multi-carrier source maps each
-      // group window across the physical parts (buildCompactGroupResult).
-      for (size_t index = 0; index < sourceParts.size(); ++index) {
-        inputs.push_back(std::make_pair(sourceParts[index], maskParts[index]));
-      }
-      return inputs;
-    }
-    // Eight-bit two-wide sources unpack each carrier into a pair of 16-bit
-    // reductions, so they consume exactly one physical source part.
-    const bool singleCarrier = sourceParts.size() == 1;
-    if (!singleCarrier) {
-      return rewriter.notifyMatchFailure(
-          op, "compact eight-bit group_reduce requires one source carrier");
-    }
-    for (int64_t part = 0; part < kPairWidth; ++part) {
-      auto input = prepareCompactReduction(op, sourceParts.front(),
-                                           maskParts.front(), part, rewriter);
-      if (failed(input)) {
-        return failure();
-      }
-      inputs.push_back(*input);
-    }
-    return inputs;
-  }
-
   // Row-local slots=1 results hand back one physical part per group.
   LogicalResult lowerRowLocalSlots1Result(
       OpTy op, ArrayRef<std::pair<Value, Value>> inputs, VRegType resultType,
@@ -284,18 +201,14 @@ private:
       return lowerSingletonGroups(op, sourceParts.front(), maskParts.front(),
                                    resultType, rewriter);
     }
-    auto logicalType = cast<VMIVRegType>(op.getSource().getType());
-    auto integerType = dyn_cast<IntegerType>(logicalType.getElementType());
-    bool twoWideParts = integerType && integerType.getWidth() == kElementBits8 &&
-                        logicalType.getElementCount() > kWidePartElemThreshold;
-    FailureOr<SmallVector<std::pair<Value, Value>, kPairWidth>> inputs =
-        collectCompactInputs(op, sourceParts, maskParts, twoWideParts, rewriter);
-    if (failed(inputs)) {
-      return failure();
+    // Each group window can span several assigned, supported input carriers.
+    SmallVector<std::pair<Value, Value>, kPairWidth> inputs;
+    for (size_t index = 0; index < sourceParts.size(); ++index) {
+      inputs.emplace_back(sourceParts[index], maskParts[index]);
     }
     if (rowLocalSlots1) {
-      return lowerRowLocalSlots1Result(op, *inputs, resultType, groupSize,
-                                       numGroups, rewriter);
+      return lowerRowLocalSlots1Result(op, inputs, resultType, groupSize,
+                                      numGroups, rewriter);
     }
     FailureOr<MaskType> resultMaskType =
         getMaskTypeForVReg(resultType, rewriter.getContext());
@@ -303,7 +216,7 @@ private:
       return failure();
     }
     FailureOr<Value> packet = buildCompactPacket(
-        op, *inputs, resultType, *resultMaskType, groupSize, rewriter);
+        op, inputs, resultType, *resultMaskType, groupSize, rewriter);
     if (failed(packet)) {
       return failure();
     }
