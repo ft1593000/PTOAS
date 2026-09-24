@@ -21,6 +21,12 @@ set(PTOAS_RUNTIME_SOURCES
   ObjectEmission.cpp
 )
 
+add_library(PTOASBishengScheduler STATIC BishengScheduler.cpp)
+llvm_update_compile_flags(PTOASBishengScheduler)
+set_target_properties(PTOASBishengScheduler PROPERTIES POSITION_INDEPENDENT_CODE ON)
+target_include_directories(PTOASBishengScheduler PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
+target_link_libraries(PTOASBishengScheduler PUBLIC LLVMSupport)
+
 add_library(PTOASVFSIMTSizePatcher STATIC
   VFSIMTSizePatcher.cpp
 )
@@ -80,6 +86,7 @@ set(PTOAS_RUNTIME_LINK_LIBS
   PTOIR
   PTOTransforms
   PTOASVFSIMTSizePatcher
+  PTOASBishengScheduler
   ptobc_lib
   MLIRMlirOptMain
   MLIRBufferizationTransforms
@@ -481,4 +488,3 @@ if(PTOAS_ENABLE_ONLINE_CORE_COMPILE)
     endif()
   endforeach()
 endif()
-
