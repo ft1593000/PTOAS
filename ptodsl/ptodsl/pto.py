@@ -177,9 +177,6 @@ from ._control_flow import (    # noqa: F401
     _short_circuit_and, _short_circuit_or,
 )
 
-# ── All-reduce ─────────────────────────────────────────────────────────────────
-from ._allreduce import simt_allreduce_max, simt_allreduce_min, simt_allreduce_sum  # noqa: F401
-
 # ── Scalar value and memory surface ──────────────────────────────────────────
 #
 # Keep the implementation in one internal module while exposing one public

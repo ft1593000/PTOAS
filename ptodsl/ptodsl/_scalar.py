@@ -147,11 +147,23 @@ def select(cond, true_val, false_val):
     """Frontend ``pto.select`` lowered to ``arith.select`` by PTOAS."""
     raw_true = unwrap_surface_value(true_val)
     raw_false = unwrap_surface_value(false_val)
+    # Remember the authored input type before the operands are coerced to the
+    # common carrier below; the result must be restored to this type.
+    input_type = raw_true.type
     true_kind = classify_runtime_scalar_type(raw_true.type)
     false_kind = classify_runtime_scalar_type(raw_false.type)
     if {true_kind, false_kind} == {"index", "integer"}:
         target_type = raw_true.type if true_kind == "index" else raw_false.type
     elif true_kind == false_kind == "integer":
+        if raw_true.type != raw_false.type:
+            # A type mismatch would silently pick one arm's width/signedness
+            # for the result (and truncate the other arm); force an explicit
+            # cast instead.
+            raise TypeError(
+                "pto.select integer arms require matching types; "
+                f"got {raw_true.type} and {raw_false.type}; "
+                "cast explicitly before the operation"
+            )
         target_type = _signless_integer_type(raw_true.type)
     else:
         target_type = raw_true.type
@@ -167,7 +179,7 @@ def select(cond, true_val, false_val):
         ],
     ).results[0]
     return wrap_surface_value(
-        _restore_authored_integer_type(result, raw_true.type)
+        _restore_authored_integer_type(result, input_type)
     )
 
 
